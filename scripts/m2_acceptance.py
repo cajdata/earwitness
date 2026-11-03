@@ -40,7 +40,6 @@ from earwitness.thunder.search import (
 )
 
 R_MAX_M = 25000.0
-SYNTH_RADIUS_M = 50000.0
 
 
 def pick_sites(
@@ -109,7 +108,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--cache", type=Path, default=None)
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--grid-km", type=float, default=5.0)
-    ap.add_argument("--top", type=int, default=10)
+    ap.add_argument("--top", type=int, default=20)
+    ap.add_argument(
+        "--synth-radius-km",
+        type=float,
+        default=25.0,
+        help="synthesize from strikes within this distance (default 25, the model radius)",
+    )
+    ap.add_argument("--score", choices=["cosine", "pearson"], default="cosine")
     ap.add_argument("--bearing-weight", type=float, default=0.0)
     ap.add_argument(
         "--conus-day",
@@ -151,7 +157,8 @@ def main(argv: list[str] | None = None) -> int:
         t_clip = min(max(t_clip, start.timestamp()), end.timestamp() - clip_s)
         clip_start = datetime.fromtimestamp(t_clip, tz=UTC)
         near = events.subset(
-            geodesy.horizontal_distance(events.lat, events.lon, lat, lon) <= SYNTH_RADIUS_M
+            geodesy.horizontal_distance(events.lat, events.lon, lat, lon)
+            <= args.synth_radius_km * 1000.0
         )
         near = near.between(t_clip - 120.0, t_clip + clip_s)
         strikes = [
@@ -169,10 +176,10 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(
             f"\ncase {k}: site {lat:.4f},{lon:.4f} with {count} flashes in a window; "
-            f"clip {utc_iso(clip_start)}; {len(strikes)} strikes within 50 km"
+            f"clip {utc_iso(clip_start)}; {len(strikes)} strikes within {args.synth_radius_km:g} km"
         )
         cfg = PipelineConfig(
-            search=SearchConfig(bearing_weight=args.bearing_weight),
+            search=SearchConfig(bearing_weight=args.bearing_weight, score_mode=args.score),
             grid_spacing_m=args.grid_km * 1000.0,
             top_k=args.top,
         )

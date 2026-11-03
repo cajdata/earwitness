@@ -48,6 +48,8 @@ class SearchConfig:
     bearing_weight: float = 0.0
     """0 disables bearing-diversity weighting; 1 fully flattens the bearing histogram."""
     bearing_sectors: int = 8
+    score_mode: str = "cosine"
+    """"cosine" (per the handoff) or "pearson" (window mean removed, see docs/METHOD.md)."""
 
 
 @dataclass
@@ -144,6 +146,47 @@ def sliding_cosine(observed: ArrayLike, models: ArrayLike) -> FloatArray:
     scores = np.zeros_like(corr)
     np.divide(corr, denom, out=scores, where=valid)
     return np.clip(scores, -1.0, 1.0)
+
+
+def sliding_pearson(observed: ArrayLike, models: ArrayLike) -> FloatArray:
+    """Correlation coefficient of `observed` against every length-K window of each model row.
+
+    Like `sliding_cosine` but with the mean removed from the observed clip and from each model
+    window, so a shared loudness floor (a continuous rumble) earns no credit and only the timing
+    structure counts. Windows with no model variance score 0.
+    """
+    o = np.asarray(observed, dtype=float)
+    m = np.atleast_2d(np.asarray(models, dtype=float))
+    k, t = o.size, m.shape[1]
+    if k == 0 or k > t:
+        raise ValueError(f"observed length {k} must be between 1 and model length {t}")
+    n = t - k + 1
+    o = o - o.mean()
+    norm_o = float(np.linalg.norm(o))
+    if norm_o == 0.0:
+        return np.zeros((m.shape[0], n))
+    nfft = next_fast_len(t + k - 1)
+    corr = irfft(rfft(m, nfft, axis=1) * np.conj(rfft(o, nfft)), nfft, axis=1)[:, :n]
+    zeros = np.zeros((m.shape[0], 1))
+    c1 = np.concatenate([zeros, np.cumsum(m, axis=1)], axis=1)
+    c2 = np.concatenate([zeros, np.cumsum(m * m, axis=1)], axis=1)
+    s1 = c1[:, k : k + n] - c1[:, :n]
+    s2 = c2[:, k : k + n] - c2[:, :n]
+    var = s2 - s1 * s1 / k
+    denom = norm_o * np.sqrt(np.maximum(var, 0.0))
+    valid = var > 1e-18
+    scores = np.zeros_like(corr)
+    np.divide(corr, denom, out=scores, where=valid)
+    return np.clip(scores, -1.0, 1.0)
+
+
+def sliding_score(observed: ArrayLike, models: ArrayLike, mode: str = "cosine") -> FloatArray:
+    """Dispatch on `SearchConfig.score_mode`."""
+    if mode == "cosine":
+        return sliding_cosine(observed, models)
+    if mode == "pearson":
+        return sliding_pearson(observed, models)
+    raise ValueError(f"unknown score mode {mode!r}; use 'cosine' or 'pearson'")
 
 
 class StrikeIndex:
@@ -313,7 +356,7 @@ def search(
             model_cfg,
             search_cfg,
         )
-        scores = sliding_cosine(o, models)
+        scores = sliding_score(o, models, search_cfg.score_mode)
         top_idx = np.argpartition(-scores, n_top - 1, axis=1)[:, :n_top]
         top_sc = np.take_along_axis(scores, top_idx, axis=1)
         order = np.argsort(-top_sc, axis=1, kind="stable")

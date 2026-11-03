@@ -1,6 +1,7 @@
 """Sliding cosine scoring, prefilter, bearing weights and model rendering, with worked numbers."""
 
 import numpy as np
+import pytest
 
 from earwitness.core import geodesy
 from earwitness.data.adapters import LightningEvents
@@ -122,3 +123,32 @@ def test_search_scores_true_point_and_offset_highest():
     assert res.top_scores.shape == (2, 3)
     assert res.top_scores[0, 0] >= res.top_scores[0, 1]
     assert res.n_strikes.tolist() == [3, 3]
+
+
+def test_sliding_pearson_matches_brute_force_and_ignores_a_floor():
+    rng = np.random.default_rng(3)
+    o = rng.uniform(0.0, 1.0, 9)
+    m = rng.uniform(0.0, 1.0, (2, 40))
+    scores = ts.sliding_pearson(o, m)
+    assert scores.shape == (2, 32)
+    for b in range(2):
+        for tau in range(32):
+            w = m[b, tau : tau + 9]
+            expected = np.corrcoef(o, w)[0, 1]
+            assert abs(scores[b, tau] - expected) < 1e-9
+    # A constant floor added to the model changes cosine but not Pearson.
+    lifted = m + 5.0
+    np.testing.assert_allclose(ts.sliding_pearson(o, lifted), scores, atol=1e-9)
+    assert np.max(np.abs(ts.sliding_cosine(o, lifted) - ts.sliding_cosine(o, m))) > 0.05
+    # Flat windows and a flat observation score zero instead of dividing by zero.
+    assert np.all(ts.sliding_pearson(o, np.ones((1, 20))) == 0.0)
+    assert np.all(ts.sliding_pearson(np.ones(5), m) == 0.0)
+
+
+def test_sliding_score_dispatch():
+    o = np.array([1.0, 0.0])
+    m = np.array([[0.0, 1.0, 0.0, 0.0]])
+    np.testing.assert_allclose(ts.sliding_score(o, m, "cosine"), ts.sliding_cosine(o, m))
+    np.testing.assert_allclose(ts.sliding_score(o, m, "pearson"), ts.sliding_pearson(o, m))
+    with pytest.raises(ValueError, match="score mode"):
+        ts.sliding_score(o, m, "euclid")

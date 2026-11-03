@@ -195,6 +195,12 @@ def _build_analyze_thunder(p: argparse.ArgumentParser) -> None:
         help="bearing-diversity weighting strength, 0 to 1 (default 0, off)",
     )
     tune.add_argument("--mask-wind", action="store_true", help="zero wind-flagged frames")
+    tune.add_argument(
+        "--score",
+        choices=["cosine", "pearson"],
+        default="cosine",
+        help="window score: cosine (per the handoff) or pearson (mean removed)",
+    )
     out = p.add_argument_group("output")
     out.add_argument("--out", type=Path, default=None, help="run folder (default runs/<stamp>)")
     out.add_argument("--quiet", action="store_true", help="no progress output")
@@ -254,6 +260,7 @@ def _analyze_thunder(args: argparse.Namespace) -> int:
             r_max_m=args.rmax_km * 1000.0,
             min_strikes=args.min_strikes,
             bearing_weight=args.bearing_weight,
+            score_mode=args.score,
         ),
         grid_spacing_m=args.grid_km * 1000.0,
         top_k=args.top,

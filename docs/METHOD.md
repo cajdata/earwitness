@@ -45,3 +45,7 @@ Implementation notes that differ from or sharpen the handoff:
   bearing shifts all arrivals together and the start-time offset absorbs it, so the score has a
   ridge through the truth rather than a peak. Synthetic single-cell cases land within a few
   kilometers on that ridge; two cells in different directions pin the point to the 200 m grid.
+- Score modes: `cosine` is the handoff's sliding cosine. `pearson` removes the mean of the
+  observed clip and of each model window first, so a continuous rumble shared by many places and
+  times earns no credit and only the timing structure counts. Dense storms are where the two
+  differ; the M2 acceptance report compares them.
