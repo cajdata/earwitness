@@ -266,12 +266,13 @@ def main(argv: list[str] | None = None) -> int:
         events.save(case_dir / "truth" / "events.json")
         site = case["site"]
         chosen = sorted(truth["events"], key=lambda e: e["cpa_slant_m"])[:need]
+        chosen_txt = "; ".join(
+            f"{e['icao']} {e['type']} {e['cpa_slant_m']:.0f} m at {e['cpa_heard_time_s']:.0f} s"
+            for e in chosen
+        )
         print(
-            f"\ncase {k}: site {site[0]:.4f},{site[1]:.4f}; {len(truth['events'])} audible flyovers; "
-            + "; ".join(
-                f"{e['icao']} {e['type']} {e['cpa_slant_m']:.0f} m at {e['cpa_heard_time_s']:.0f} s"
-                for e in chosen
-            )
+            f"\ncase {k}: site {site[0]:.4f},{site[1]:.4f}; "
+            f"{len(truth['events'])} audible flyovers; {chosen_txt}"
         )
         t0 = time.perf_counter()
         summary = analyze_aircraft(
@@ -378,7 +379,8 @@ def main(argv: list[str] | None = None) -> int:
     ]
     (args.out / "m4_acceptance.md").write_text("\n".join(lines) + "\n")
     print(
-        f"\nrank 1 within 200 m: {passed} of {len(rows)} (or mirror: {passed_mirror}); report in {args.out}"
+        f"\nrank 1 within 200 m: {passed} of {len(rows)} (or mirror: {passed_mirror}); "
+        f"report in {args.out}"
     )
     return 0
 
