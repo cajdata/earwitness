@@ -49,3 +49,20 @@ Implementation notes that differ from or sharpen the handoff:
   observed clip and of each model window first, so a continuous rumble shared by many places and
   times earns no credit and only the timing structure counts. Dense storms are where the two
   differ; the M2 acceptance report compares them.
+
+## M3 implementation notes (aircraft data)
+
+- Legs: an aircraft's day is cut at readsb's new-leg flag, at gaps longer than 60 s, and where
+  a ground point is followed by an airborne one. Ground points are dropped. Legs with fewer
+  than five airborne points are discarded.
+- Vertical datum: geometric altitude (GNSS, WGS84 ellipsoid) is used where broadcast. Where only
+  barometric altitude exists, it is shifted by the leg's median geometric-minus-barometric
+  offset, or kept uncorrected and flagged when the leg never broadcast geometric altitude.
+  Ground height for a candidate point is Copernicus GLO-30 (orthometric) plus the EGM96 geoid
+  undulation, so aircraft and ground share the ellipsoid.
+- Interpolation: positions in local ENU about the candidate are resampled to 1 s with a
+  shape-preserving PCHIP interpolant, then wrapped in the M1 `Track` (cubic spline) that the
+  Doppler model evaluates; velocity comes from the spline derivative.
+- Engine class: the ICAO type designator from the trace is looked up in the dump1090 table
+  (L1P piston, L1T turboprop, L2J jet, H.. helicopter). Designators missing from that table
+  classify as unknown; the M4 funnel decides how to treat them.

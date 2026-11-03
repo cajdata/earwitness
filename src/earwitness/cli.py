@@ -40,10 +40,7 @@ def build_parser() -> argparse.ArgumentParser:
     data = sub.add_parser("data", help="download public data into the local cache")
     data_sub = data.add_subparsers(dest="source", metavar="<source>")
     _build_data_glm(data_sub.add_parser("glm", help="GOES GLM lightning flashes (NOAA, AWS)"))
-    adsb = data_sub.add_parser("adsb", help="adsb.lol traces (M3)")
-    adsb.add_argument("--date", required=True, help="UTC date, YYYY-MM-DD")
-    adsb.add_argument("--bbox", required=True, nargs="+", help=BBOX_HELP)
-    adsb.set_defaults(func=_not_implemented, milestone="M3")
+    _build_data_adsb(data_sub.add_parser("adsb", help="adsb.lol daily traces (ODbL)"))
 
     sim = sub.add_parser("simulate", help="write a synthetic recording plus truth.json")
     sim_sub = sim.add_subparsers(dest="method", metavar="<method>")
@@ -148,6 +145,68 @@ def _data_glm(args: argparse.Namespace) -> int:
     if args.export is not None:
         save_events(args.export, events)
         print(f"exported to {args.export}")
+    return 0
+
+
+# ----------------------------------------------------------------------------- data adsb
+
+
+def _build_data_adsb(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--date", required=True, help="UTC date, YYYY-MM-DD")
+    p.add_argument("--bbox", required=True, nargs="+", help=BBOX_HELP)
+    p.add_argument(
+        "--variant", choices=["prod", "staging"], default="prod", help="adsb.lol instance (prod)"
+    )
+    p.add_argument("--cache", type=Path, default=None, help="cache root (default data/cache)")
+    p.add_argument(
+        "--keep-raw", action="store_true", help="keep the downloaded tar parts after conversion"
+    )
+    p.add_argument(
+        "--parts",
+        type=Path,
+        nargs="+",
+        default=None,
+        help="already downloaded tar parts to read instead of fetching the release",
+    )
+    p.add_argument("--force", action="store_true", help="rebuild even if the day is cached")
+    p.set_defaults(func=_data_adsb)
+
+
+def _data_adsb(args: argparse.Namespace) -> int:
+    from earwitness.aircraft.prep import flights_summary, prepare_flights
+    from earwitness.core.grid import parse_bbox
+    from earwitness.data.adsb_lol import build_day, day_cache_path, load_day
+    from earwitness.data.aircraft_types import TypeTable
+    from earwitness.data.cache import cache_root
+    from earwitness.project import parse_utc_date
+
+    bbox = parse_bbox(args.bbox)
+    day = parse_utc_date(args.date).date()
+    root = cache_root(args.cache)
+    dest = day_cache_path(root, day, bbox, args.variant)
+    if dest.exists() and not args.force:
+        print(f"cached: {dest}")
+    else:
+        stats = build_day(
+            day, bbox, root, args.variant, parts=args.parts, keep_raw=args.keep_raw, log=print
+        )
+        print(
+            f"{stats.traces_read} traces read; {stats.aircraft_kept} aircraft and "
+            f"{stats.points_kept} points kept"
+        )
+    table = load_day(day, bbox, root, args.variant)
+    try:
+        types = TypeTable.load(root)
+    except RuntimeError as exc:
+        print(f"warning: {exc}", file=sys.stderr)
+        types = None
+    flights = prepare_flights(table, types)
+    counts = flights_summary(flights)
+    print(
+        f"{table.num_rows} points, {len(flights)} airborne legs: "
+        + ", ".join(f"{k} {v}" for k, v in sorted(counts.items()))
+    )
+    print(f"parquet: {dest}")
     return 0
 
 

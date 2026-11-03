@@ -21,8 +21,8 @@ acceptance check; no real recording has been validated yet (that is M6).
 | M0 | Scaffold, CI, packaging | done |
 | M1 | Physics core, forward models, synthetic recordings (`earwitness simulate`) | done |
 | M2 | Thunder pipeline on GOES GLM: loader, search, refinement, outputs | done, see [docs/VALIDATION.md](docs/VALIDATION.md) |
-| M3 | ADS-B data (adsb.lol) | next |
-| M4 | Aircraft Doppler pipeline | planned |
+| M3 | ADS-B data: adsb.lol loader, aircraft types, terrain | done |
+| M4 | Aircraft Doppler pipeline | next |
 | M5 | Desktop UI | planned |
 | M6 | Real-world validation | planned |
 | M7 | v0.1.0 release and site | planned |
@@ -77,6 +77,12 @@ Or fetch and export the flashes first:
 
 ```bash
 uv run earwitness data glm --date 2025-05-16 --hours 21-23 --bbox=-97,33,-82,42 --export flashes.parquet
+```
+
+Cache one day of adsb.lol traces for a region (about 4 GB downloaded, a few hundred MB kept):
+
+```bash
+uv run earwitness data adsb --date 2026-09-08 --bbox=-125,24,-66,50
 ```
 
 Write `--bbox=W,S,E,N` with the equals sign, or give the four numbers as separate arguments,

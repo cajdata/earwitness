@@ -14,6 +14,12 @@ from earwitness.core.physics import doppler_curve as _doppler_curve
 FloatArray = NDArray[np.float64]
 
 
+def uniform_times(t0: float, t1: float, step_s: float) -> FloatArray:
+    """t0, t0 + step, ... through t1 when it lies on the grid; safe for Unix-scale times."""
+    n = int(np.floor((t1 - t0) / step_s + 1e-6)) + 1
+    return t0 + np.arange(n) * step_s
+
+
 class Track:
     """An aircraft path in local ENU meters with a smooth interpolant for position and velocity.
 
@@ -58,7 +64,7 @@ class Track:
     def resample(self, step_s: float = 1.0) -> Track:
         """Resample to a uniform step over the original span."""
         t0, t1 = self.span
-        t = np.arange(t0, t1 + 1e-9, step_s)
+        t = uniform_times(t0, t1, step_s)
         return Track(t, self.position(t), icao=self.icao, type_code=self.type_code)
 
     @classmethod
@@ -123,13 +129,16 @@ def closest_approach(track: Track, observer: ArrayLike = (0.0, 0.0, 0.0)) -> tup
     hi = float(track.t[min(i + 1, track.t.size - 1)])
     if hi <= lo:
         return float(track.t[i]), float(dist[i])
+    # Optimize in seconds relative to the nearest sample: the bounded method's tolerance scales
+    # with the magnitude of x, which would be tens of seconds for Unix times.
+    t_ref = float(track.t[i])
     res = minimize_scalar(
-        lambda tt: float(np.linalg.norm(track.position(tt) - o)),
-        bounds=(lo, hi),
+        lambda tau: float(np.linalg.norm(track.position(t_ref + tau) - o)),
+        bounds=(lo - t_ref, hi - t_ref),
         method="bounded",
         options={"xatol": 1e-7},
     )
-    return float(res.x), float(res.fun)
+    return float(t_ref + res.x), float(res.fun)
 
 
 def heard_cpa_time(track: Track, observer: ArrayLike, c: float = SPEED_OF_SOUND) -> float:

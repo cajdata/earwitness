@@ -12,6 +12,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Mapping
 from pathlib import Path
 
 DEFAULT_CACHE = Path("data") / "cache"
@@ -26,6 +27,15 @@ def cache_root(override: str | Path | None = None) -> Path:
     return Path(env) if env else DEFAULT_CACHE
 
 
+def _request(
+    url: str, headers: Mapping[str, str] | None = None, method: str = "GET"
+) -> urllib.request.Request:
+    merged = {"User-Agent": USER_AGENT}
+    if headers:
+        merged.update(headers)
+    return urllib.request.Request(url, headers=merged, method=method)
+
+
 def download(url: str, dest: Path, timeout: float = 120.0, retries: int = 3) -> Path:
     """Download `url` to `dest` atomically, retrying transient failures."""
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -33,15 +43,21 @@ def download(url: str, dest: Path, timeout: float = 120.0, retries: int = 3) -> 
     for attempt in range(retries):
         tmp_path: Path | None = None
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
             with (
-                urllib.request.urlopen(req, timeout=timeout) as resp,
+                urllib.request.urlopen(_request(url), timeout=timeout) as resp,
                 tempfile.NamedTemporaryFile(dir=dest.parent, delete=False) as tmp,
             ):
                 shutil.copyfileobj(resp, tmp, length=1 << 20)
                 tmp_path = Path(tmp.name)
             tmp_path.replace(dest)
             return dest
+        except urllib.error.HTTPError as exc:
+            last = exc
+            if tmp_path is not None and tmp_path.exists():
+                tmp_path.unlink(missing_ok=True)
+            if 400 <= exc.code < 500 and exc.code != 429:
+                break  # not transient: missing object, forbidden
+            time.sleep(1.5 * (attempt + 1))
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             last = exc
             if tmp_path is not None and tmp_path.exists():
@@ -50,14 +66,26 @@ def download(url: str, dest: Path, timeout: float = 120.0, retries: int = 3) -> 
     raise RuntimeError(f"download failed after {retries} attempts: {url}: {last}")
 
 
-def fetch_text(url: str, timeout: float = 60.0, retries: int = 3) -> str:
-    """GET a small text resource (listings, indexes)."""
+def fetch_text(
+    url: str,
+    timeout: float = 60.0,
+    retries: int = 3,
+    headers: Mapping[str, str] | None = None,
+    method: str = "GET",
+) -> str:
+    """GET (or POST with an empty body) a small text resource such as a listing or an index."""
     last: Exception | None = None
     for attempt in range(retries):
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            req = _request(url, headers, method)
+            data = b"" if method == "POST" else None
+            with urllib.request.urlopen(req, data=data, timeout=timeout) as resp:
                 return resp.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            last = exc
+            if 400 <= exc.code < 500 and exc.code != 429:
+                break
+            time.sleep(1.5 * (attempt + 1))
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             last = exc
             time.sleep(1.5 * (attempt + 1))
