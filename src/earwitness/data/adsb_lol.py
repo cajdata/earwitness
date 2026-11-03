@@ -383,7 +383,7 @@ def build_day(
     log: Log = None,
     flush_points: int = 2_000_000,
 ) -> BuildStats:
-    """Download (unless `parts` is given), stream, clip to the region and write the day's Parquet."""
+    """Download (unless `parts` is given), stream, clip to the region, write the Parquet."""
     root = cache_root(root)
     dest = day_cache_path(root, day, bbox, variant)
     if parts is None:
