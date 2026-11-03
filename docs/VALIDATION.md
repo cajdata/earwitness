@@ -85,6 +85,33 @@ thunder is audible at a site, the model must render it (raise `--rmax-km`), or t
 must be treated as a dense-storm case where the fingerprint is weak. M6 should measure the
 effective radius on real recordings before `R_max` is trusted.
 
+### Continental-US, one full day: 114 s
+
+Runtime criterion (HANDOFF M2): a one-day continental-US search finishes in under 30 minutes on
+an 8-core desktop. One synthetic case (30 minutes, 29 real flashes within 25 km, site near
+45.49 N 73.06 W) searched against every GLM flash of 2025-05-16 in the box `-125,24,-66,50`:
+
+```bash
+uv run python scripts/m2_acceptance.py --date 2025-05-16 --conus-day --bbox=-125,24,-66,50 --cases 1 --seed 2 --out runs/m2-conus
+```
+
+| stage | size | time |
+| --- | --- | --- |
+| flashes in the box and day | 682,694 | loaded from the Parquet cache |
+| grid at 5 km | 600,855 points, 405,567 on land | 9 s including the land mask |
+| prefilter, N >= 9 within 25 km | 80,475 candidates | 5 s |
+| coarse search, 17,281 offsets at 5 s | 80,475 candidates | 88 s |
+| refinement, 20 regions, 1 km then 200 m | | 11 s |
+| whole pipeline | | 114 s |
+
+Result: rank 1, 221 m from the truth, clip start within 0.2 s, score 0.997 against 0.900 for
+the next region. Downloading the day's GLM files (4,320 files, about 2.6 GB) took 15 minutes on
+this connection and is a one-time cost per day of data; the 24 cached Parquet files total 28 MB.
+
+Machine: Intel Core Ultra 7 270K Plus, 31 GB RAM. The pipeline is single-threaded numpy and
+scipy, so the core count does not matter yet; an 8-core desktop of the same generation would
+take about as long.
+
 ### Observations
 
 - Single-direction storms produce a ridge: range along the storm bearing trades against the
