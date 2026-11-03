@@ -476,6 +476,20 @@ def extract_traces(parts: list[Path], icaos: set[str]) -> dict[str, Trace]:
     return found
 
 
+def cached_regions(root: Path | None, day: date, variant: str = "prod") -> list[tuple[BBox, Path]]:
+    """Regions already cached for a day, largest first."""
+    folder = cache_root(root) / "adsb" / variant / day.isoformat()
+    out: list[tuple[BBox, Path]] = []
+    for path in folder.glob("*.parquet") if folder.exists() else []:
+        try:
+            w, s, e, n = (float(v.replace("m", "-")) for v in path.stem.split("_"))
+            out.append((BBox(w, s, e, n), path))
+        except ValueError:
+            continue
+    out.sort(key=lambda item: -item[0].area_km2())
+    return out
+
+
 def history_trace_url(day: date, icao: str) -> str:
     """adsb.lol's per-day trace file for one aircraft; the replay view loads the same file."""
     icao = icao.lower()

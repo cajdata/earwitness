@@ -50,9 +50,9 @@ def build_parser() -> argparse.ArgumentParser:
     ana = sub.add_parser("analyze", help="locate a recording")
     ana_sub = ana.add_subparsers(dest="method", metavar="<method>")
     _build_analyze_thunder(ana_sub.add_parser("thunder", help="thunder against lightning records"))
-    air = ana_sub.add_parser("aircraft", help="aircraft Doppler against ADS-B (M4)")
-    air.add_argument("file", help="local audio or video file")
-    air.set_defaults(func=_not_implemented, milestone="M4")
+    _build_analyze_aircraft(
+        ana_sub.add_parser("aircraft", help="prop-aircraft Doppler against ADS-B")
+    )
 
     audit = sub.add_parser("audit", help="report which location clues a recording contains")
     audit.add_argument("file", help="local audio or video file")
@@ -338,6 +338,138 @@ def _analyze_thunder(args: argparse.Namespace) -> int:
         print(
             f"{t['rank']:>4}  {t['score']:6.3f}  {t['lat']:9.4f}  {t['lon']:10.4f}  "
             f"{t['offset_utc']:<24}  {t['n_strikes']}"
+        )
+    return 0
+
+
+# ----------------------------------------------------------------------------- analyze aircraft
+
+
+def _build_analyze_aircraft(p: argparse.ArgumentParser) -> None:
+    p.add_argument("file", help="local audio or video file")
+    p.add_argument(
+        "--events", type=Path, required=True, help="events.json with the measured flyovers"
+    )
+    when = p.add_argument_group("time prior")
+    when.add_argument("--date", required=True, help="UTC date the clip was recorded, YYYY-MM-DD")
+    when.add_argument("--date-end", default=None, help="last possible UTC date, inclusive")
+    when.add_argument(
+        "--known-time", default=None, help="recording start, UTC ISO (overrides events.json)"
+    )
+    when.add_argument("--known-time-tolerance", type=float, default=None, help="seconds")
+    where = p.add_argument_group("region prior")
+    where.add_argument("--bbox", default=None, nargs="+", help=BBOX_HELP)
+    where.add_argument("--region", type=Path, default=None, help="GeoJSON polygon file")
+    src = p.add_argument_group("aircraft data")
+    src.add_argument(
+        "--tracks",
+        type=Path,
+        default=None,
+        help="simulator tracks.json instead of the adsb.lol cache",
+    )
+    src.add_argument("--variant", default="prod", help="cached adsb.lol instance (default prod)")
+    src.add_argument("--cache", type=Path, default=None, help="cache root (default data/cache)")
+    tune = p.add_argument_group("search")
+    tune.add_argument("--silence", choices=["hard", "soft", "off"], default="hard")
+    tune.add_argument("--no-terrain", action="store_true", help="flat ground at the ellipsoid")
+    tune.add_argument("--top", type=int, default=10, help="flight pairs to refine and report")
+    tune.add_argument("--max-candidates", type=int, default=30000)
+    tune.add_argument("--harmonics", type=int, default=1, help="harmonics to score (default 1)")
+    out = p.add_argument_group("output")
+    out.add_argument("--out", type=Path, default=None, help="run folder (default runs/<stamp>)")
+    out.add_argument("--quiet", action="store_true", help="no progress output")
+    p.set_defaults(func=_analyze_aircraft)
+
+
+def _analyze_aircraft(args: argparse.Namespace) -> int:
+    import json
+
+    from earwitness.aircraft.funnel import FunnelConfig
+    from earwitness.aircraft.pipeline import (
+        AircraftPipelineConfig,
+        AircraftPriors,
+        analyze_aircraft,
+    )
+    from earwitness.aircraft.prep import flights_from_tracks_json, prepare_flights
+    from earwitness.aircraft.score import ScoreConfig
+    from earwitness.audio.events import EventSet
+    from earwitness.core.grid import geometry_bbox, geometry_from_geojson, parse_bbox
+    from earwitness.project import parse_utc, parse_utc_date, utc_now
+
+    recording = Path(args.file)
+    if not recording.exists():
+        print(f"earwitness: no such file {recording}", file=sys.stderr)
+        return 2
+    events = EventSet.load(args.events)
+    if args.known_time:
+        events.known_time = parse_utc(args.known_time)
+    if args.known_time_tolerance is not None:
+        events.known_time_tolerance_s = args.known_time_tolerance
+    start = parse_utc_date(args.date)
+    end = (parse_utc_date(args.date_end) if args.date_end else start) + timedelta(days=1)
+    if args.region is not None:
+        geometry = geometry_from_geojson(json.loads(args.region.read_text(encoding="utf-8")))
+        region = geometry_bbox(geometry)
+    elif args.bbox:
+        region = parse_bbox(args.bbox)
+    else:
+        print("earwitness: aircraft analysis needs --bbox or --region", file=sys.stderr)
+        return 2
+    terrain = None
+    if args.tracks is not None:
+        flights = flights_from_tracks_json(args.tracks)
+    else:
+        from earwitness.data.adsb_lol import cached_regions, load_day
+        from earwitness.data.aircraft_types import TypeTable
+
+        day = start.date()
+        options = [
+            (b, p)
+            for b, p in cached_regions(args.cache, day, args.variant)
+            if b.contains(*region.center)
+        ]
+        if not options:
+            print(
+                f"earwitness: no cached adsb.lol day covering the region for {day}; "
+                "run `earwitness data adsb` first",
+                file=sys.stderr,
+            )
+            return 1
+        cached_bbox, _ = options[-1]
+        table = load_day(
+            day, cached_bbox, args.cache, args.variant, sub_bbox=region.expand(12000.0)
+        )
+        flights = prepare_flights(table, TypeTable.load(args.cache))
+    if not args.no_terrain:
+        from earwitness.data.dem import Terrain
+
+        terrain = Terrain(args.cache)
+    cfg = AircraftPipelineConfig(
+        funnel=FunnelConfig(silence_mode=args.silence),
+        score=ScoreConfig(harmonics=args.harmonics),
+        top_pairs=args.top,
+        max_candidates=args.max_candidates,
+        use_terrain=not args.no_terrain,
+    )
+    out_dir = args.out or Path("runs") / f"{utc_now():%Y%m%dT%H%M%SZ}-{recording.stem}-aircraft"
+    priors = AircraftPriors(start=start, end=end, region=region)
+    summary = analyze_aircraft(
+        recording,
+        events,
+        flights,
+        priors,
+        out_dir,
+        cfg,
+        terrain,
+        progress=None if args.quiet else print,
+    )
+    print(f"run folder: {out_dir}")
+    print(f"{'rank':>4}  {'score':>7}  {'lat':>9}  {'lon':>10}  {'clip start (UTC)':<24}  flights")
+    for t in summary["top"]:  # type: ignore[union-attr]
+        names = " + ".join(f.get("icao", "?") for f in t["flights"] if f)
+        print(
+            f"{t['rank']:>4}  {t['score']:7.3f}  {t['lat']:9.4f}  {t['lon']:10.4f}  "
+            f"{t['t_start_utc']:<24}  {names}"
         )
     return 0
 

@@ -102,6 +102,10 @@ def flyover_curve(
     return doppler_curve(track, ORIGIN, t_r, flyover.f0_hz, c=scenario.speed_of_sound)
 
 
+AMPLITUDE_REFERENCE_M = 300.0
+"""A tone at this slant range has amplitude 1; amplitude falls as 1/r from there."""
+
+
 def _render_tone(
     out: FloatArray,
     rate: int,
@@ -109,10 +113,14 @@ def _render_tone(
     t_hi: float,
     curve: DopplerCurve,
     flyover: Flyover,
+    reference_m: float = AMPLITUDE_REFERENCE_M,
 ) -> None:
-    """Add the harmonic tone with instantaneous frequency `curve.f` to `out`, in place."""
+    """Add the harmonic tone with instantaneous frequency `curve.f` to `out`, in place.
+
+    `curve.t_r` is clip-relative reception time; sample k of the span sits at t_lo + k / rate.
+    """
     phase_c = 2.0 * np.pi * cumulative_trapezoid(curve.f, curve.t_r, initial=0.0)
-    amp_c = np.minimum(flyover.cpa_slant_m / curve.r, 1.0)
+    amp_c = np.minimum(reference_m / curve.r, 1.0)
     i0 = int(np.ceil(t_lo * rate))
     i1 = min(int(np.floor(t_hi * rate)), out.size)
     f_max = float(np.max(curve.f))
@@ -154,6 +162,46 @@ def synthesize_aircraft(
         t_c = np.arange(t_lo, t_hi + coarse_dt_s, coarse_dt_s)
         curve = flyover_curve(track, flyover, scenario, t_c)
         _render_tone(out, rate, t_lo, t_hi, curve, flyover)
+    return out
+
+
+@dataclass(frozen=True)
+class TrackSource:
+    """A real or synthetic track to render: any Cartesian frame shared with the observer."""
+
+    track: Track
+    f0_hz: float
+    harmonics: int = 8
+    harmonic_rolloff: float = 1.0
+    label: str = ""
+
+
+def synthesize_from_tracks(
+    observer_xyz: FloatArray,
+    t_start_unix: float,
+    duration_s: float,
+    rate: int,
+    sources: list[TrackSource],
+    speed_of_sound: float = SPEED_OF_SOUND,
+    coarse_dt_s: float = 0.01,
+    reference_m: float = AMPLITUDE_REFERENCE_M,
+) -> FloatArray:
+    """Render tones for tracks with absolute times, heard at `observer_xyz` from `t_start_unix`."""
+    n = round(duration_s * rate)
+    out = np.zeros(n)
+    for src in sources:
+        a, b = src.track.span
+        lo = max(0.0, a - t_start_unix + 2.0)
+        hi = min(duration_s, b - t_start_unix - 2.0)
+        if hi <= lo:
+            continue
+        t_c = np.arange(lo, hi + coarse_dt_s, coarse_dt_s)
+        curve = doppler_curve(
+            src.track, observer_xyz, t_start_unix + t_c, src.f0_hz, c=speed_of_sound
+        )
+        shifted = DopplerCurve(t_r=t_c, t_e=curve.t_e, r=curve.r, v_r=curve.v_r, f=curve.f)
+        stand_in = Flyover(0.0, 0.0, 0.0, 0.0, 0.0, src.f0_hz, src.harmonics, src.harmonic_rolloff)
+        _render_tone(out, rate, lo, hi, shifted, stand_in, reference_m)
     return out
 
 

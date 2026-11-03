@@ -10,7 +10,9 @@ shape-preserving (PCHIP) interpolant, so irregular 1 to 10 s ADS-B samples do no
 from __future__ import annotations
 
 import itertools
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 import pyarrow as pa
@@ -63,6 +65,16 @@ class Flight:
     ) -> Track:
         """Uniform-step ENU track about a reference point."""
         return interpolate_track(self, ref_lat, ref_lon, ref_h, step_s)
+
+    def track_ecef(self, step_s: float = 1.0) -> Track:
+        """Uniform-step track in ECEF meters with absolute Unix times; frame-free for scoring."""
+        xyz = geodesy.geodetic_to_ecef(self.lat, self.lon, self.height_m).reshape(-1, 3)
+        t0, t1 = self.span
+        if t1 - t0 < step_s:
+            raise ValueError("flight too short to interpolate")
+        t = uniform_times(t0, t1, step_s)
+        samples = PchipInterpolator(self.time_unix, xyz, axis=0, extrapolate=False)(t)
+        return Track(t, samples, icao=self.icao, type_code=self.type_code)
 
 
 def split_legs(
@@ -203,6 +215,31 @@ def interpolate_track(
     else:
         samples = np.repeat(enu[:1], t.size, axis=0)
     return Track(t, samples, icao=flight.icao, type_code=flight.type_code)
+
+
+def flights_from_tracks_json(path: str | Path, engine_class: str = "piston") -> list[Flight]:
+    """Flights from a simulator `tracks.json` (one trace per synthetic aircraft at 1 s)."""
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    flights: list[Flight] = []
+    for ac in data["aircraft"]:
+        pts = ac["points"]
+        t = np.array([p["t"] for p in pts], dtype=float)
+        flights.append(
+            Flight(
+                icao=str(ac.get("icao", "")),
+                leg=0,
+                type_code=str(ac.get("type", "")),
+                description="",
+                engine_class=str(ac.get("engine_class_name", engine_class)),
+                time_unix=t,
+                lat=np.array([p["lat"] for p in pts], dtype=float),
+                lon=np.array([p["lon"] for p in pts], dtype=float),
+                height_m=np.array([p["alt_m"] for p in pts], dtype=float),
+                gs_mps=np.array([p["gs_mps"] for p in pts], dtype=float),
+                height_source="geometric",
+            )
+        )
+    return flights
 
 
 def flights_summary(flights: list[Flight]) -> dict[str, int]:
