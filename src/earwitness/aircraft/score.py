@@ -69,8 +69,9 @@ class SpectrogramIndex:
         f_hz = np.asarray(f_hz, dtype=float)
         col = np.clip(np.rint((t_s - self.t[0]) / self.dt).astype(int), 0, self.t.size - 1)
         pos = (f_hz - self.f[0]) / self.df
-        valid = (pos >= 0.0) & (pos <= self.f.size - 1) & np.isfinite(pos)
-        pos_c = np.clip(pos, 0.0, self.f.size - 1 - 1e-9)
+        finite = np.isfinite(pos)
+        valid = finite & (pos >= 0.0) & (pos <= self.f.size - 1)
+        pos_c = np.where(finite, np.clip(pos, 0.0, self.f.size - 1 - 1e-9), 0.0)
         lo = np.floor(pos_c).astype(int)
         frac = pos_c - lo
         hi = np.minimum(lo + 1, self.f.size - 1)
@@ -82,16 +83,26 @@ class SpectrogramIndex:
 def frequency_ratio(
     track: Track, observer_xyz: FloatArray, t_abs: FloatArray, cfg: ScoreConfig
 ) -> FloatArray:
-    """Received over rest frequency, c / (c + v_r), at absolute reception times."""
-    return doppler_curve(
-        track.position,
-        track.velocity,
-        observer_xyz,
-        t_abs,
-        1.0,
-        c=cfg.speed_of_sound,
-        iterations=cfg.iterations,
-    ).f
+    """Received over rest frequency, c / (c + v_r), at absolute reception times.
+
+    Times outside the track's span (allowing the acoustic delay) give NaN, so a leg that ends
+    inside a scoring window simply contributes fewer frames.
+    """
+    t_abs = np.asarray(t_abs, dtype=float)
+    t0, t1 = track.span
+    inside = (t_abs >= t0) & (t_abs <= t1 + 60.0)
+    out = np.full(t_abs.shape, np.nan)
+    if inside.any():
+        out[inside] = doppler_curve(
+            track.position,
+            track.velocity,
+            observer_xyz,
+            t_abs[inside],
+            1.0,
+            c=cfg.speed_of_sound,
+            iterations=cfg.iterations,
+        ).f
+    return out
 
 
 @dataclass(frozen=True)

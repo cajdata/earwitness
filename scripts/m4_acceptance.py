@@ -330,10 +330,12 @@ def main(argv: list[str] | None = None) -> int:
                 }
             )
         rows.append(row)
+        err_txt = "n/a" if row["top1_error_m"] is None else f"{row['top1_error_m']:.0f}"
+        mir_txt = "n/a" if row["top1_mirror_m"] is None else f"{row['top1_mirror_m']:.0f}"
         print(
-            f"  rank-1 error {row['top1_error_m'] if row['top1_error_m'] is None else round(row['top1_error_m'])} m "
-            f"(mirror {row['top1_mirror_m'] if row['top1_mirror_m'] is None else round(row['top1_mirror_m'])} m), "
-            f"pair correct: {row['top1_pair_correct']}, rank within 200 m: {row['rank_within_200m']}, "
+            f"  rank-1 error {err_txt} m (mirror {mir_txt} m), "
+            f"pair correct: {row['top1_pair_correct']}, "
+            f"rank within 200 m: {row['rank_within_200m']}, "
             f"{row['candidates']} candidates, {runtime:.0f} s"
         )
     passed = sum(1 for r in rows if r["rank_within_200m"] == 1)
@@ -363,12 +365,16 @@ def main(argv: list[str] | None = None) -> int:
     for r in rows:
         e = "n/a" if r["top1_error_m"] is None else f"{r['top1_error_m']:.0f}"
         m = "n/a" if r["top1_mirror_m"] is None else f"{r['top1_mirror_m']:.0f}"
+        flights_txt = " + ".join(r["truth_icaos"])
         lines.append(
-            f"| {r['case']} | {r['flyovers_rendered']} | {' + '.join(r['truth_icaos'])} | {e} | {m} | {r['top1_pair_correct']} | {r['rank_within_200m']} | {r['candidates']} | {r['runtime_s']:.0f} |"
+            f"| {r['case']} | {r['flyovers_rendered']} | {flights_txt} | {e} | {m} | "
+            f"{r['top1_pair_correct']} | {r['rank_within_200m']} | {r['candidates']} | "
+            f"{r['runtime_s']:.0f} |"
         )
     lines += [
         "",
-        f"Rank 1 within 200 m: {passed} of {len(rows)}; within 200 m of the site or its mirror: {passed_mirror} of {len(rows)}.",
+        f"Rank 1 within 200 m: {passed} of {len(rows)}; within 200 m of the site or its "
+        f"mirror: {passed_mirror} of {len(rows)}.",
     ]
     (args.out / "m4_acceptance.md").write_text("\n".join(lines) + "\n")
     print(
