@@ -27,6 +27,8 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://earwitness.dev"
+Source = "https://github.com/cajdata/earwitness"
+Issues = "https://github.com/cajdata/earwitness/issues"
 
 [project.scripts]
 earwitness = "earwitness.cli:main"

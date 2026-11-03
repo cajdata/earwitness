@@ -20,7 +20,8 @@ The full spec is docs/HANDOFF.md. Read it before changing anything in src/.
 - The CLI uses argparse (stdlib) because the handoff lists no CLI library.
 - ffmpeg is optional: needed only for `simulate ... --codec aac|mp3` and for decoding non-WAV
   input. Tests that need it skip when it is missing; CI installs it.
-- Open decisions (HANDOFF "Open decisions for Chris") were applied with the recommendation
-  column: Apache-2.0, CI on Windows plus Linux, local web UI, no global search in the UI,
-  no Blitzortung adapter, no helicopters in v0.1.
-- Milestone state: M0 and M1 built. Next is M2 (thunder pipeline on GLM).
+- Open decisions (HANDOFF "Open decisions for Chris") are settled as the recommendation column,
+  confirmed on 2026-11-03: Apache-2.0, CI on Windows plus Linux, local web UI, no global search
+  in the UI, no Blitzortung adapter, no helicopters in v0.1.
+- Repo: https://github.com/cajdata/earwitness (public). Milestone state: M0 and M1 built.
+  Next is M2 (thunder pipeline on GLM).

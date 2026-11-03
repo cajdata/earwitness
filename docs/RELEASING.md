@@ -8,7 +8,7 @@ No API token is stored anywhere.
 1. Create a PyPI account and enable 2FA.
 2. On PyPI, add a **pending** trusted publisher (Your projects -> Publishing):
    - PyPI project name: `earwitness`
-   - Owner: the GitHub user or organization that hosts the repo
+   - Owner: `cajdata`
    - Repository name: `earwitness`
    - Workflow name: `release.yml`
    - Environment name: `pypi`

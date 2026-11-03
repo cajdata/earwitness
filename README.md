@@ -8,7 +8,8 @@ against lightning records, and the Doppler whine of propeller aircraft, matched 
 flight records. It is a clean-room reconstruction of the method colsto demonstrated on YouTube in
 2026 (about 5 km for thunder with free data, about 100 m for aircraft).
 
-Site: [earwitness.dev](https://earwitness.dev). Full specification: [docs/HANDOFF.md](docs/HANDOFF.md).
+Site: [earwitness.dev](https://earwitness.dev). Source: [github.com/cajdata/earwitness](https://github.com/cajdata/earwitness).
+Full specification: [docs/HANDOFF.md](docs/HANDOFF.md).
 
 ## Status
 
