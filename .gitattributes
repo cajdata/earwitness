@@ -1,0 +1,4 @@
+# Keep LF in the repo and in every checkout so Windows and Linux CI see identical files.
+* text=auto eol=lf
+*.wav binary
+*.png binary
