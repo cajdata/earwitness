@@ -65,6 +65,24 @@ Each case folder holds `recording.wav`, `truth.json` (location, start time, even
 mixing parameters) and the synthetic source data the search will consume later (`tracks.json`
 or `strikes.json`).
 
+Locate a thunder recording against real GOES GLM lightning data. The first run downloads the
+hours it needs into `data/cache` (about 110 MB per hour) and the Natural Earth land mask:
+
+```bash
+uv run earwitness analyze thunder recording.wav --date 2025-05-16 --time-window 2025-05-16T21:00:00Z 2025-05-17T00:00:00Z --bbox=-97,33,-82,42 --out runs/example
+```
+
+Or fetch and export the flashes first:
+
+```bash
+uv run earwitness data glm --date 2025-05-16 --hours 21-23 --bbox=-97,33,-82,42 --export flashes.parquet
+```
+
+Write `--bbox=W,S,E,N` with the equals sign, or give the four numbers as separate arguments,
+so a negative western longitude is not mistaken for an option. Each analysis run writes a folder
+with `results.parquet`, `heatmap.geojson`, `histogram.json`, per-candidate overlays,
+`config.toml`, `priors.json`, `summary.json` and a run log.
+
 ## How it works
 
 The recording is the receiver, the lightning strikes or aircraft are the satellites, and the

@@ -132,11 +132,14 @@ def sliding_cosine(observed: ArrayLike, models: ArrayLike) -> FloatArray:
     if k == 0 or k > t:
         raise ValueError(f"observed length {k} must be between 1 and model length {t}")
     n = t - k + 1
+    norm_o = float(np.linalg.norm(o))
+    if norm_o == 0.0:
+        return np.zeros((m.shape[0], n))
     nfft = next_fast_len(t + k - 1)
     corr = irfft(rfft(m, nfft, axis=1) * np.conj(rfft(o, nfft)), nfft, axis=1)[:, :n]
     csum = np.concatenate([np.zeros((m.shape[0], 1)), np.cumsum(m * m, axis=1)], axis=1)
     energy = csum[:, k : k + n] - csum[:, :n]
-    denom = np.linalg.norm(o) * np.sqrt(np.maximum(energy, 0.0))
+    denom = norm_o * np.sqrt(np.maximum(energy, 0.0))
     valid = energy > 1e-18
     scores = np.zeros_like(corr)
     np.divide(corr, denom, out=scores, where=valid)

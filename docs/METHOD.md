@@ -20,3 +20,28 @@ Implementation notes that differ from or sharpen the handoff:
   scored, not in time. See `tests/test_physics.py`.
 - A closed-form solution for the straight-line constant-velocity flyover
   (`physics.straight_line_doppler`) exists and is used to validate the iterative solver.
+
+## M2 implementation notes (thunder search)
+
+- Observed envelope: the M1 extraction, then subtraction of the 10th-percentile noise floor so
+  quiet stretches score as silence, then resampling to the sweep step. A heuristic wind flag
+  (sustained frames where 20 to 60 Hz dominates 60 to 250 Hz) is reported and can mask frames.
+- Candidate grid: rows and columns at the requested spacing using the WGS84 radii of curvature,
+  clipped to a GeoJSON polygon when given, then to Natural Earth land unless disabled.
+- Prefilter: a point survives when at least N strikes within 25 km fall inside some window of
+  clip length, with N = max(3, round(0.6 x observed peak count)); peaks are prominences above
+  20% of the envelope maximum at least 10 s apart.
+- Scoring: the model envelope of each candidate is rendered once over the whole offset range
+  plus the clip length; one real FFT per batch of 256 candidates gives the cross-correlation
+  with the observed envelope at every offset, and a cumulative sum of the squared model gives
+  the per-window energy. The score is the cosine, with the best three offsets kept.
+- Refinement: the top regions (greedy, at least 15 km apart) are re-searched on a 1 km grid
+  within 5 km with offsets within 60 s at 1 s, then on a 200 m grid within 1 km with offsets
+  within 10 s.
+- Bearing-diversity weighting (off by default): strikes are binned into eight bearing sectors
+  around the candidate and weighted by (mean count / sector count)^strength, so an isolated
+  direction counts more than a crowded one.
+- Ridge ambiguity: when every strike lies in one direction, moving the candidate along that
+  bearing shifts all arrivals together and the start-time offset absorbs it, so the score has a
+  ridge through the truth rather than a peak. Synthetic single-cell cases land within a few
+  kilometers on that ridge; two cells in different directions pin the point to the 200 m grid.
