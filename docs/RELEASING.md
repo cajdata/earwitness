@@ -1,6 +1,6 @@
 # Releasing
 
-Releases publish to PyPI through trusted publishing from `.github/workflows/release.yml`.
+Releases publish to PyPI through trusted publishing from `.github/workflows/publish.yml`.
 No API token is stored anywhere.
 
 ## One-time setup (account owner)
@@ -10,7 +10,7 @@ No API token is stored anywhere.
    - PyPI project name: `earwitness`
    - Owner: `cajdata`
    - Repository name: `earwitness`
-   - Workflow name: `release.yml`
+   - Workflow name: `publish.yml`
    - Environment name: `pypi`
 3. In the GitHub repo, create an environment named `pypi` (Settings -> Environments). Optionally
    require a reviewer on it.
