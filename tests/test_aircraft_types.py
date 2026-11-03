@@ -64,7 +64,7 @@ def test_tables_merge_with_icao_export_winning(tmp_path):
     (base / "icao_doc8643.json").write_text(json.dumps(icao))
     (base / "icao_aircraft_types.json").write_text(json.dumps(old))
     table = at.TypeTable.load(tmp_path, allow_download=False)
-    assert len(table) == 3
+    assert len(table) == 3 + len(at.BUILTIN_SUPPLEMENT)
     assert table.get("c172").name == "CESSNA 172"
     assert table.engine_class("P28A") == "piston"
     assert table.engine_class("B738") == "jet"
@@ -74,8 +74,23 @@ def test_tables_merge_with_icao_export_winning(tmp_path):
     assert at.classify("P28A", None) == "unknown"
     assert "ICAO DOC 8643" in table.source
     assert "dump1090" in table.source
+    assert "supplement" in table.source
 
 
 def test_load_without_any_table_fails(tmp_path):
     with pytest.raises(RuntimeError, match="no aircraft type table"):
         at.TypeTable.load(tmp_path, allow_download=False)
+
+
+def test_builtin_and_user_supplements(tmp_path):
+    base = tmp_path / "aircraft_types"
+    base.mkdir()
+    (base / "icao_aircraft_types.json").write_text(
+        json.dumps({"C172": {"desc": "L1P", "wtc": "L"}})
+    )
+    (base / "supplement.json").write_text(json.dumps({"zzz9": "L2P"}))
+    table = at.TypeTable.load(tmp_path, allow_download=False)
+    assert table.engine_class("B38M") == "jet"  # built-in supplement
+    assert table.engine_class("K100") == "turboprop"
+    assert table.engine_class("ZZZ9") == "piston"  # user supplement, case-insensitive
+    assert table.engine_class("C172") == "piston"

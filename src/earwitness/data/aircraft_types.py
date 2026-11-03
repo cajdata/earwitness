@@ -24,6 +24,31 @@ DUMP1090_URL = (
 )
 
 ENGINE_CLASSES = {"P": "piston", "T": "turboprop", "J": "jet", "E": "electric", "R": "rocket"}
+
+# Designators that entered service after the dump1090 table was compiled. ICAO DOC 8643
+# descriptions, kept short on purpose; anything else unknown can be supplied through
+# `aircraft_types/supplement.json` in the cache ({"CODE": "L1P", ...}).
+BUILTIN_SUPPLEMENT: dict[str, str] = {
+    "A20N": "L2J",  # Airbus A320neo
+    "A21N": "L2J",  # Airbus A321neo
+    "A19N": "L2J",  # Airbus A319neo
+    "A339": "L2J",  # Airbus A330-900neo
+    "A338": "L2J",  # Airbus A330-800neo
+    "A35K": "L2J",  # Airbus A350-1000
+    "B37M": "L2J",  # Boeing 737 MAX 7
+    "B38M": "L2J",  # Boeing 737 MAX 8
+    "B39M": "L2J",  # Boeing 737 MAX 9
+    "B3XM": "L2J",  # Boeing 737 MAX 10
+    "B78X": "L2J",  # Boeing 787-10
+    "E290": "L2J",  # Embraer E190-E2
+    "E295": "L2J",  # Embraer E195-E2
+    "E275": "L2J",  # Embraer E175-E2
+    "C700": "L2J",  # Cessna Citation Longitude
+    "GL7T": "L2J",  # Bombardier Global 7500
+    "GA7C": "L2J",  # Gulfstream G700
+    "B505": "H1T",  # Bell 505 Jet Ranger X
+    "K100": "L1T",  # Daher Kodiak 100
+}
 VEHICLE_KINDS = {
     "L": "landplane",
     "S": "seaplane",
@@ -134,6 +159,14 @@ class TypeTable:
             tables.append(cls.from_dump1090(d1090_path))
         if not tables:
             raise RuntimeError("no aircraft type table available; check network access")
+        supplement = {code: TypeInfo(code, desc) for code, desc in BUILTIN_SUPPLEMENT.items()}
+        user_path = base / "supplement.json"
+        if user_path.exists():
+            extra = json.loads(user_path.read_text(encoding="utf-8"))
+            supplement.update(
+                {c.upper(): TypeInfo(c.upper(), str(d).upper()) for c, d in extra.items()}
+            )
+        tables.append(cls(supplement, "built-in supplement"))
         merged: dict[str, TypeInfo] = {}
         for table in reversed(tables):  # later tables (fallbacks) first, so the ICAO export wins
             merged.update(table.entries)

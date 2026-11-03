@@ -459,6 +459,23 @@ def load_day(
     return table.filter(pa.array(keep)) if not keep.all() else table
 
 
+def extract_traces(parts: list[Path], icaos: set[str]) -> dict[str, Trace]:
+    """Parse only the named aircraft from a streamed release; used to compare instances."""
+    wanted = {i.lower() for i in icaos}
+    found: dict[str, Trace] = {}
+    for name, raw in iter_trace_files(parts):
+        base = name.rsplit("/", 1)[-1]
+        icao = base[len("trace_full_") : -len(".json")].lower()
+        if icao not in wanted:
+            continue
+        trace = parse_trace(raw)
+        if trace is not None:
+            found[icao] = trace
+        if len(found) == len(wanted):
+            break
+    return found
+
+
 def history_trace_url(day: date, icao: str) -> str:
     """adsb.lol's per-day trace file for one aircraft; the replay view loads the same file."""
     icao = icao.lower()

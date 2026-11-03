@@ -169,3 +169,11 @@ def test_clip_trace_requires_min_points():
     kept = al.clip_trace(tr, BBox(-98.0, 34.0, -96.0, 36.0), None, None, min_points=1)
     assert kept is not None
     assert len(kept) == 1
+
+
+def test_extract_traces_picks_only_requested_aircraft(tmp_path):
+    parts = _build_parts(tmp_path)
+    found = al.extract_traces(parts, {"A03A42", "nothere"})
+    assert set(found) == {"a03a42"}
+    assert found["a03a42"].type_code == "B738"
+    assert len(found["a03a42"]) == 10
