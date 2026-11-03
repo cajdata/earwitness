@@ -1,5 +1,5 @@
 # Local data cache and personal recordings. Never commit.
-data/
+/data/
 
 # Simulation and analysis output folders written from the repo root
 case*/
