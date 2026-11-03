@@ -3,6 +3,83 @@
 Results of the acceptance checks, synthetic first (M2, M4) and real recordings later (M6).
 Every number here comes from a run that can be repeated with the command shown.
 
+## M3: aircraft data, one continental-US day (2026-09-08)
+
+Acceptance criterion (HANDOFF M3): one continental-US day processes end to end, and spot-checked
+flights match the adsb.lol replay.
+
+Day: 2026-09-08, the date of colsto's reference recording (HANDOFF section "Testing and
+validation"), from adsb.lol release `v2026.09.08-planes-readsb-prod-0`: two tar parts, 3.87 GB.
+Region: the continental-US box `-125,24,-66,50`.
+
+```bash
+uv run earwitness data adsb --date 2026-09-08 --bbox=-125,24,-66,50 --keep-raw
+```
+
+| stage | size | time |
+| --- | --- | --- |
+| download, two parts | 3.87 GB | 2 min on this connection |
+| stream, parse and clip every trace | 47,384 aircraft, 58.9 million points kept | 5 min 19 s |
+| Parquet written | 1.48 GB (zstd) | |
+| flight preparation | 188,423 airborne legs | about 1 min |
+
+Engine classes of the prepared legs, from the aircraft type designators in the traces:
+
+| class | legs |
+| --- | --- |
+| piston | 90,585 |
+| turboprop | 11,955 |
+| jet | 52,637 |
+| helicopter | 18,016 |
+| other | 110 |
+| unknown | 15,120 |
+
+Before the built-in supplement of nineteen designators newer than the dump1090 table (B38M,
+A21N, B39M, A20N, E295, C700 and others) the unknown count was 24,995. Of the 15,120 that
+remain, 14,407 carry no designator at all: aircraft absent from readsb's database, including
+every non-ICAO `~` address. The rest are gliders, balloons and experimental types.
+
+Height sources: 98,857 legs geometric (GNSS, WGS84), 84,358 barometric shifted by the leg's
+median geometric-minus-baro offset, 5,208 barometric with no correction available.
+
+Terrain check at known places (Copernicus GLO-30 plus EGM96):
+
+| place | DEM (m) | geoid (m) | ellipsoidal (m) |
+| --- | --- | --- | --- |
+| Oklahoma City | 364.4 | -27.7 | 336.6 |
+| Denver | 1596.5 | -17.0 | 1579.5 |
+| Miami Beach | 5.1 | -28.0 | -22.8 |
+| Gulf of Mexico (no tile) | 0.0 | -27.1 | -27.1 |
+
+### Spot check
+
+adsb.lol's site does not hold per-aircraft trace files for 2026-09-08 (the files and the
+replay heat map both return 404 for that day, while 2025-09-08 and 2026-11-01 are served), so
+the replay itself cannot be opened for this date. The release is the archive the replay is
+built from, and the reference used instead is adsb.lol's second instance, `readsb-staging-0`,
+from the same day's staging release: its traces are extracted by the same streaming parser and
+compared by interpolating the cached prod flight at the staging timestamps.
+
+```bash
+uv run python scripts/m3_spotcheck.py --date 2026-09-08 --bbox=-125,24,-66,50 --sample 8 --seed 1
+```
+
+| aircraft | cached points | staging points | compared | median (m) | p95 (m) | max (m) | type code agrees |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| c001eb | 1082 | 1081 | 904 | 0.0 | 1.6 | 5.7 | yes |
+| a69e60 | 1289 | 1289 | 1142 | 0.0 | 0.0 | 0.6 | yes |
+| 86953e | 1107 | 1107 | 1076 | 0.0 | 1.6 | 2.7 | yes |
+| aed4a2 | 380 | 380 | 380 | 0.0 | 0.4 | 0.6 | yes |
+| ac6576 | 775 | 775 | 775 | 0.0 | 0.4 | 0.8 | yes |
+| a18ff8 | 1079 | 1079 | 1079 | 0.0 | 0.0 | 6.1 | yes |
+| ab4c78 | 217 | 217 | 217 | 0.0 | 0.0 | 1.4 | yes |
+| a73a1c | 3837 | 3837 | 3501 | 0.0 | 1.2 | 6.8 | yes |
+
+Eight of eight agree. The two instances turn out to carry almost identical traces for these
+aircraft (same point counts, sub-meter medians), so this confirms the archive, the streaming
+extraction, the clipping and the timestamps rather than receiver independence. The compared
+column counts staging points inside the cached leg's time span and off the ground.
+
 ## M2: thunder pipeline on real GLM storm data (synthetic recordings)
 
 Data: GOES-19 GLM flashes for 2025-05-16, 21:00 to 24:00 UTC, over the central and eastern
