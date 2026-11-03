@@ -66,3 +66,31 @@ Implementation notes that differ from or sharpen the handoff:
 - Engine class: the ICAO type designator from the trace is looked up in the dump1090 table
   (L1P piston, L1T turboprop, L2J jet, H.. helicopter). Designators missing from that table
   classify as unknown; the M4 funnel decides how to treat them.
+
+## M4 implementation notes (aircraft funnel and scoring)
+
+- Events: `events.json` stores ranges, not points, for each flyover's heard closest-approach
+  time, rest frequency, speed and closest-approach slant distance, plus silence windows and an
+  optional known recording start. `events_from_truth` turns a simulator truth into such ranges.
+- Frames: all geometry runs in ECEF with absolute Unix times, so no tangent plane has to cover
+  the search region. Candidates live on a latitude/longitude lattice with metric spacing whose
+  integer cell ids make the two-event spatial join a sorted-array intersection.
+- Funnel order: speed gate on the indexed samples; pair prefilter in (x, y, time shifted by the
+  gap) so a ball query finds flight pairs that meet in space in the right time order; distance
+  tubes laid across each flight at the lattice spacing between the lateral offsets the distance
+  range allows for the aircraft's height above ground, checked with the exact closest approach
+  of the 1 s track; timing join on cell ids with the gap tolerance; silence filter counting
+  other admitted flights within 4 km during the silent windows, never the candidate's own event
+  flights. Single-event mode replaces the pair with the known time plus tolerance.
+- Scoring: the received frequency is f0 times a geometry-only ratio c / (c + v_r), computed once
+  per candidate and flight on a 0.1 s grid; every (time shift, f0) pair in the sweep is a
+  resampling. The score is the mean whitened brightness (dB above the per-frequency median)
+  along the curve over a window around the measured closest approach. Event 1 sweeps time
+  and f0, which fixes the recording start; event 2 sweeps f0 only. A traced curve, when given
+  in single-event mode, is scored by minus the RMS frequency error instead.
+- Refinement: the best cell of each of the top flight pairs is re-scored on a 100 m grid
+  within 300 m; the heat map scores 100 m cells within 1.5 km of the best pairs.
+- Mirror ambiguity: one straight flyover is symmetric across its ground path, so a single
+  event with a known time yields the site and its reflection with equal scores. Track
+  curvature, terrain, other aircraft in the silence windows or the region prior break the tie;
+  a second event always does.

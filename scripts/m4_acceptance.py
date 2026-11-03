@@ -13,7 +13,8 @@ across the event flight's path (a single straight flyover cannot tell the two ap
 the right flights were paired, candidate counts and runtime.
 
 Example:
-  uv run python scripts/m4_acceptance.py --date 2026-09-08 --bbox=-100,30,-85,42 --cases 10 --out runs/m4
+  uv run python scripts/m4_acceptance.py --date 2026-09-08 --bbox=-100,30,-85,42 \
+      --cases 10 --out runs/m4
 """
 
 from __future__ import annotations
@@ -355,7 +356,8 @@ def main(argv: list[str] | None = None) -> int:
     lines = [
         f"# M4 acceptance ({args.mode}-event): {args.date}, region {bbox}",
         "",
-        "| case | flyovers rendered | event flights | rank-1 error (m) | mirror (m) | pair correct | rank within 200 m | candidates | runtime (s) |",
+        "| case | flyovers rendered | event flights | rank-1 error (m) | mirror (m) | "
+        "pair correct | rank within 200 m | candidates | runtime (s) |",
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for r in rows:
