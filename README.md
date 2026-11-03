@@ -13,14 +13,15 @@ Full specification: [docs/HANDOFF.md](docs/HANDOFF.md).
 
 ## Status
 
-Pre-alpha. Nothing here locates real recordings yet.
+Pre-alpha. The thunder method runs end to end on real GOES GLM data and passes its synthetic
+acceptance check; no real recording has been validated yet (that is M6).
 
 | Milestone | Scope | State |
 | --- | --- | --- |
 | M0 | Scaffold, CI, packaging | done |
 | M1 | Physics core, forward models, synthetic recordings (`earwitness simulate`) | done |
-| M2 | Thunder pipeline on GOES GLM | next |
-| M3 | ADS-B data (adsb.lol) | planned |
+| M2 | Thunder pipeline on GOES GLM: loader, search, refinement, outputs | done, see [docs/VALIDATION.md](docs/VALIDATION.md) |
+| M3 | ADS-B data (adsb.lol) | next |
 | M4 | Aircraft Doppler pipeline | planned |
 | M5 | Desktop UI | planned |
 | M6 | Real-world validation | planned |

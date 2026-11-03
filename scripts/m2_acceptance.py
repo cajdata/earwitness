@@ -78,10 +78,10 @@ def pick_sites(
 def busiest_window(
     events: LightningEvents, lat: float, lon: float, clip_s: float, start: float, end: float
 ) -> float:
-    """Unix start of the clip-length window inside [start, end] with the most flashes within R_MAX."""
+    """Unix start, inside [start, end], of the busiest clip-length window at a site."""
     d = geodesy.horizontal_distance(events.lat, events.lon, lat, lon)
     t = np.sort(events.time_unix[d <= R_MAX_M])
-    starts = t[(t >= start) & (t <= end - clip_s)]
+    starts = t[(t >= start) & (t <= end)]
     if starts.size == 0:
         return start
     counts = np.searchsorted(t, starts + clip_s, side="right") - np.searchsorted(
@@ -160,7 +160,7 @@ def main(argv: list[str] | None = None) -> int:
     for k, (lat, lon, count) in enumerate(sites, start=1):
         case_dir = args.out / f"case_{k:02d}"
         t_clip = busiest_window(events, lat, lon, clip_s, start.timestamp(), end.timestamp()) - 60.0
-        t_clip = min(max(t_clip, start.timestamp()), end.timestamp() - clip_s)
+        t_clip = min(max(t_clip, start.timestamp()), end.timestamp())
         clip_start = datetime.fromtimestamp(t_clip, tz=UTC)
         near = events.subset(
             geodesy.horizontal_distance(events.lat, events.lon, lat, lon)
