@@ -279,6 +279,8 @@ Done when: at least one real aircraft case and one real thunder case are documen
 
 Done when: a clean Windows machine can install and run the synthetic demo.
 
+Clue sources to consider after v0.1 (mains hum, ships, trains, helicopters, weather radar, rare one-off events) are collected in [FUTURE_SOURCES.md](FUTURE_SOURCES.md). Nothing there changes the milestones above.
+
 ## Testing and validation
 
 Synthetic cases with known answers drive development; real recordings validate it at the end.
