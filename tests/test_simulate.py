@@ -233,6 +233,6 @@ def test_cli_simulate_aircraft_rejects_a_short_clip(tmp_path, capsys):
 
 
 def test_cli_unimplemented_commands_exit_3(capsys):
-    assert cli.main(["analyze", "thunder", "x.wav"]) == 3
+    assert cli.main(["analyze", "aircraft", "x.wav"]) == 3
     assert cli.main(["ui"]) == 3
     assert "planned for" in capsys.readouterr().err

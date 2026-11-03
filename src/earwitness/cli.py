@@ -1,16 +1,17 @@
 """Command-line entry point: `earwitness <command>`. The planned surface is in docs/HANDOFF.md.
 
-M1 implements `simulate thunder` and `simulate aircraft`. The other commands exist so the help
-text shows the full shape of the tool, and exit with code 3 until their milestone lands.
+Implemented: `simulate thunder|aircraft` (M1), `data glm` and `analyze thunder` (M2). The other
+commands exist so the help text shows the full shape of the tool, and exit with code 3 until
+their milestone lands.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 from collections.abc import Sequence
+from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -24,6 +25,7 @@ if TYPE_CHECKING:
 
 NOT_IMPLEMENTED = 3
 DEFAULT_RATE = 16000
+BBOX_HELP = "west south east north in degrees (or --bbox=w,s,e,n)"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -35,25 +37,25 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"earwitness {__version__}")
     sub = parser.add_subparsers(dest="command", metavar="<command>")
 
-    data = sub.add_parser("data", help="download public data into the local cache (M2, M3)")
+    data = sub.add_parser("data", help="download public data into the local cache")
     data_sub = data.add_subparsers(dest="source", metavar="<source>")
-    for name, text in (("glm", "GOES GLM lightning (M2)"), ("adsb", "adsb.lol traces (M3)")):
-        p = data_sub.add_parser(name, help=text)
-        p.add_argument("--date", required=True, help="UTC date, YYYY-MM-DD")
-        p.add_argument("--bbox", required=True, help="west,south,east,north in degrees")
-        p.set_defaults(func=_not_implemented, milestone="M2" if name == "glm" else "M3")
+    _build_data_glm(data_sub.add_parser("glm", help="GOES GLM lightning flashes (NOAA, AWS)"))
+    adsb = data_sub.add_parser("adsb", help="adsb.lol traces (M3)")
+    adsb.add_argument("--date", required=True, help="UTC date, YYYY-MM-DD")
+    adsb.add_argument("--bbox", required=True, nargs="+", help=BBOX_HELP)
+    adsb.set_defaults(func=_not_implemented, milestone="M3")
 
     sim = sub.add_parser("simulate", help="write a synthetic recording plus truth.json")
     sim_sub = sim.add_subparsers(dest="method", metavar="<method>")
     _build_simulate_thunder(sim_sub.add_parser("thunder", help="synthetic thunder case"))
     _build_simulate_aircraft(sim_sub.add_parser("aircraft", help="synthetic prop-aircraft case"))
 
-    ana = sub.add_parser("analyze", help="locate a recording (M2 thunder, M4 aircraft)")
+    ana = sub.add_parser("analyze", help="locate a recording")
     ana_sub = ana.add_subparsers(dest="method", metavar="<method>")
-    for name, ms in (("thunder", "M2"), ("aircraft", "M4")):
-        p = ana_sub.add_parser(name, help=f"{name} method ({ms})")
-        p.add_argument("file", help="local audio or video file")
-        p.set_defaults(func=_not_implemented, milestone=ms)
+    _build_analyze_thunder(ana_sub.add_parser("thunder", help="thunder against lightning records"))
+    air = ana_sub.add_parser("aircraft", help="aircraft Doppler against ADS-B (M4)")
+    air.add_argument("file", help="local audio or video file")
+    air.set_defaults(func=_not_implemented, milestone="M4")
 
     audit = sub.add_parser("audit", help="report which location clues a recording contains")
     audit.add_argument("file", help="local audio or video file")
@@ -62,6 +64,219 @@ def build_parser() -> argparse.ArgumentParser:
     ui = sub.add_parser("ui", help="open the desktop UI (M5)")
     ui.set_defaults(func=_not_implemented, milestone="M5")
     return parser
+
+
+# ----------------------------------------------------------------------------- data glm
+
+
+def _build_data_glm(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--date", required=True, help="first UTC date, YYYY-MM-DD")
+    p.add_argument("--date-end", default=None, help="last UTC date, inclusive (default: --date)")
+    p.add_argument("--bbox", required=True, nargs="+", help=BBOX_HELP)
+    p.add_argument(
+        "--hours", default="0-23", help="UTC hour range per day, e.g. 18-23 (default 0-23)"
+    )
+    p.add_argument(
+        "--satellite", default="auto", help="auto, east, west, G16, G17, G18 or G19 (default auto)"
+    )
+    p.add_argument("--cache", type=Path, default=None, help="cache root (default data/cache)")
+    p.add_argument("--workers", type=int, default=8, help="parallel downloads (default 8)")
+    p.add_argument(
+        "--export",
+        type=Path,
+        default=None,
+        help="also write the filtered events (.parquet or .json)",
+    )
+    p.add_argument(
+        "--all-quality", action="store_true", help="keep flashes with a nonzero quality flag"
+    )
+    p.set_defaults(func=_data_glm)
+
+
+def _parse_hours(text: str) -> tuple[int, int]:
+    parts = text.split("-")
+    h0, h1 = (int(parts[0]), int(parts[-1]))
+    if not (0 <= h0 <= h1 <= 23):
+        raise argparse.ArgumentTypeError("hours must be like 18-23")
+    return h0, h1
+
+
+def _data_glm(args: argparse.Namespace) -> int:
+    from earwitness.core.grid import parse_bbox
+    from earwitness.data.adapters import LightningEvents, save_events
+    from earwitness.data.glm import load_flashes, resolve_satellite
+    from earwitness.project import parse_utc_date
+
+    bbox = parse_bbox(args.bbox)
+    h0, h1 = _parse_hours(args.hours)
+    first = parse_utc_date(args.date)
+    last = parse_utc_date(args.date_end) if args.date_end else first
+    if last < first:
+        print("earwitness: --date-end is before --date", file=sys.stderr)
+        return 2
+    satellite = resolve_satellite(args.satellite, first.date(), bbox)
+    parts = []
+    day = first
+    while day <= last:
+        start = day + timedelta(hours=h0)
+        end = day + timedelta(hours=h1 + 1)
+        parts.append(
+            load_flashes(
+                satellite,
+                start,
+                end,
+                bbox,
+                args.cache,
+                good_only=not args.all_quality,
+                workers=args.workers,
+                log=print,
+            )
+        )
+        day += timedelta(days=1)
+    energies = [p.energy for p in parts if p.energy is not None]
+    events = LightningEvents(
+        time_unix=np.concatenate([p.time_unix for p in parts]),
+        lat=np.concatenate([p.lat for p in parts]),
+        lon=np.concatenate([p.lon for p in parts]),
+        energy=np.concatenate(energies) if energies else None,
+        source=f"GLM {satellite}",
+    )
+    print(
+        f"{len(events)} flashes from {satellite} inside {bbox} "
+        f"({args.date}, hours {h0:02d}-{h1:02d})"
+    )
+    if args.export is not None:
+        save_events(args.export, events)
+        print(f"exported to {args.export}")
+    return 0
+
+
+# ----------------------------------------------------------------------------- analyze thunder
+
+
+def _build_analyze_thunder(p: argparse.ArgumentParser) -> None:
+    p.add_argument("file", help="local audio or video file")
+    when = p.add_argument_group("time prior")
+    when.add_argument("--date", required=True, help="UTC date the clip was recorded, YYYY-MM-DD")
+    when.add_argument("--date-end", default=None, help="last possible UTC date, inclusive")
+    when.add_argument(
+        "--time-window",
+        nargs=2,
+        metavar=("START", "END"),
+        default=None,
+        help="narrower UTC window for the clip start, two ISO timestamps",
+    )
+    where = p.add_argument_group("region prior")
+    where.add_argument("--bbox", default=None, nargs="+", help=BBOX_HELP)
+    where.add_argument("--region", type=Path, default=None, help="GeoJSON polygon file")
+    src = p.add_argument_group("lightning data")
+    src.add_argument(
+        "--strikes", type=Path, default=None, help="events file (.json or .parquet) instead of GLM"
+    )
+    src.add_argument("--satellite", default="auto", help="GLM satellite (default auto)")
+    src.add_argument("--cache", type=Path, default=None, help="cache root (default data/cache)")
+    tune = p.add_argument_group("search")
+    tune.add_argument("--step", type=float, default=5.0, help="coarse offset step, s (default 5)")
+    tune.add_argument("--rmax-km", type=float, default=25.0, help="audible radius (default 25)")
+    tune.add_argument(
+        "--min-strikes", type=int, default=None, help="prefilter N (default from the peak count)"
+    )
+    tune.add_argument("--grid-km", type=float, default=5.0, help="coarse grid spacing (default 5)")
+    tune.add_argument(
+        "--top", type=int, default=10, help="regions to refine and report (default 10)"
+    )
+    tune.add_argument("--no-refine", action="store_true", help="stop after the coarse pass")
+    tune.add_argument("--no-land-mask", action="store_true", help="keep candidates at sea")
+    tune.add_argument("--land-scale", default="50m", choices=["10m", "50m", "110m"])
+    tune.add_argument(
+        "--bearing-weight",
+        type=float,
+        default=0.0,
+        help="bearing-diversity weighting strength, 0 to 1 (default 0, off)",
+    )
+    tune.add_argument("--mask-wind", action="store_true", help="zero wind-flagged frames")
+    out = p.add_argument_group("output")
+    out.add_argument("--out", type=Path, default=None, help="run folder (default runs/<stamp>)")
+    out.add_argument("--quiet", action="store_true", help="no progress output")
+    p.set_defaults(func=_analyze_thunder)
+
+
+def _analyze_thunder(args: argparse.Namespace) -> int:
+    import json
+
+    from earwitness.core.grid import geometry_bbox, geometry_from_geojson, parse_bbox
+    from earwitness.data.adapters import load_events
+    from earwitness.data.landmask import LandMask
+    from earwitness.project import parse_utc, parse_utc_date, utc_now
+    from earwitness.thunder.pipeline import PipelineConfig, ThunderPriors, analyze_thunder
+    from earwitness.thunder.search import SearchConfig
+
+    recording = Path(args.file)
+    if not recording.exists():
+        print(f"earwitness: no such file {recording}", file=sys.stderr)
+        return 2
+    if args.time_window:
+        start, end = parse_utc(args.time_window[0]), parse_utc(args.time_window[1])
+    else:
+        start = parse_utc_date(args.date)
+        end = (parse_utc_date(args.date_end) if args.date_end else start) + timedelta(days=1)
+    region = geometry = None
+    if args.region is not None:
+        geometry = geometry_from_geojson(json.loads(args.region.read_text(encoding="utf-8")))
+        region = geometry_bbox(geometry)
+    elif args.bbox:
+        region = parse_bbox(args.bbox)
+    if args.strikes is not None:
+        events = load_events(args.strikes)
+    else:
+        if region is None:
+            print("earwitness: GLM needs --bbox or --region (or pass --strikes)", file=sys.stderr)
+            return 2
+        from earwitness.data.glm import load_flashes, resolve_satellite
+
+        satellite = resolve_satellite(args.satellite, start.date(), region)
+        margin = timedelta(hours=1)
+        events = load_flashes(
+            satellite,
+            start - margin,
+            end + margin,
+            region.expand(args.rmax_km * 1000.0),
+            args.cache,
+            log=None if args.quiet else print,
+        )
+    if len(events) == 0:
+        print("earwitness: no lightning events in the prior window", file=sys.stderr)
+        return 1
+    landmask = None if args.no_land_mask else LandMask.natural_earth(args.cache, args.land_scale)
+    cfg = PipelineConfig(
+        search=SearchConfig(
+            step_s=args.step,
+            r_max_m=args.rmax_km * 1000.0,
+            min_strikes=args.min_strikes,
+            bearing_weight=args.bearing_weight,
+        ),
+        grid_spacing_m=args.grid_km * 1000.0,
+        top_k=args.top,
+        do_refine=not args.no_refine,
+        use_land_mask=not args.no_land_mask,
+        mask_wind=args.mask_wind,
+    )
+    out_dir = args.out or Path("runs") / f"{utc_now():%Y%m%dT%H%M%SZ}-{recording.stem}"
+    priors = ThunderPriors(start=start, end=end, region=region, region_geometry=geometry)
+    summary = analyze_thunder(
+        recording, events, priors, out_dir, cfg, landmask, progress=None if args.quiet else print
+    )
+    print(f"run folder: {out_dir}")
+    print(f"{'rank':>4}  {'score':>6}  {'lat':>9}  {'lon':>10}  {'clip start (UTC)':<24}  strikes")
+    for t in summary["top"]:  # type: ignore[union-attr]
+        print(
+            f"{t['rank']:>4}  {t['score']:6.3f}  {t['lat']:9.4f}  {t['lon']:10.4f}  "
+            f"{t['offset_utc']:<24}  {t['n_strikes']}"
+        )
+    return 0
+
+
+# ----------------------------------------------------------------------------- simulate
 
 
 def _add_simulate_common(
@@ -136,11 +351,18 @@ def _build_simulate_thunder(p: argparse.ArgumentParser) -> None:
     storm.add_argument(
         "--ic-fraction", type=float, default=0.0, help="fraction of in-cloud flashes (default 0)"
     )
-    p.add_argument(
+    real = p.add_argument_group("real strikes")
+    real.add_argument(
         "--strikes",
         type=Path,
         default=None,
-        help="JSON file of strikes (time_utc or time_s, lat, lon, kind) used instead of a storm",
+        help="events file (.json or .parquet, e.g. a GLM export) used instead of a random storm",
+    )
+    real.add_argument(
+        "--strikes-radius-km",
+        type=float,
+        default=50.0,
+        help="keep file strikes within this distance of the observer (default 50)",
     )
     p.set_defaults(func=_simulate_thunder)
 
@@ -205,20 +427,21 @@ def _mix_options(args: argparse.Namespace) -> MixOptions:
     )
 
 
-def _load_strikes(path: Path, start_unix: float) -> list[Strike]:
-    from earwitness.project import parse_utc
+def _load_strikes(
+    path: Path, start_unix: float, lat: float, lon: float, radius_m: float
+) -> list[Strike]:
+    from earwitness.core import geodesy
+    from earwitness.data.adapters import load_events
     from earwitness.simulate.thunder_synth import Strike
 
-    raw = json.loads(path.read_text(encoding="utf-8"))
-    rows = raw["strikes"] if isinstance(raw, dict) else raw
-    strikes = []
-    for row in rows:
-        if "time_s" in row:
-            t = float(row["time_s"])
-        else:
-            t = parse_utc(str(row["time_utc"])).timestamp() - start_unix
-        strikes.append(Strike(t, float(row["lat"]), float(row["lon"]), str(row.get("kind", "CG"))))
-    return strikes
+    events = load_events(path, t_ref_unix=start_unix)
+    near = geodesy.horizontal_distance(events.lat, events.lon, lat, lon) <= radius_m
+    events = events.subset(near)
+    kinds = ["CG"] * len(events) if events.kind is None else [str(k) for k in events.kind]
+    return [
+        Strike(float(t - start_unix), float(la), float(lo), k)
+        for t, la, lo, k in zip(events.time_unix, events.lat, events.lon, kinds, strict=True)
+    ]
 
 
 def _simulate_thunder(args: argparse.Namespace) -> int:
@@ -230,7 +453,12 @@ def _simulate_thunder(args: argparse.Namespace) -> int:
     duration = args.minutes * 60.0
     seed, rng = _seed_and_rng(args.seed)
     if args.strikes is not None:
-        strikes = _load_strikes(args.strikes, start.timestamp())
+        strikes = _load_strikes(
+            args.strikes, start.timestamp(), args.lat, args.lon, args.strikes_radius_km * 1000.0
+        )
+        if not strikes:
+            print("earwitness: no strikes within range of the observer", file=sys.stderr)
+            return 1
     else:
         bearing = rng.uniform(0.0, 360.0) if args.storm_bearing is None else args.storm_bearing
         drift_bearing = (

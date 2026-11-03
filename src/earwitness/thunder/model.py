@@ -109,15 +109,19 @@ def kernel_peak_time(rise_s: float, decay_s: ArrayLike) -> FloatArray:
     return rise_s * np.log1p(np.asarray(decay_s, dtype=float) / rise_s)
 
 
-def pulse_kernel(t: ArrayLike, rise_s: float, decay_s: float) -> FloatArray:
-    """Fast-attack, exponential-decay pulse normalized to a peak of 1; zero before t = 0."""
-    if rise_s <= 0.0 or decay_s <= 0.0:
+def pulse_kernel(t: ArrayLike, rise_s: float, decay_s: ArrayLike) -> FloatArray:
+    """Fast-attack, exponential-decay pulse normalized to a peak of 1; zero before t = 0.
+
+    `decay_s` may be a scalar or an array broadcastable against `t` (one decay per strike).
+    """
+    dec = np.asarray(decay_s, dtype=float)
+    if rise_s <= 0.0 or np.any(dec <= 0.0):
         raise ValueError("rise_s and decay_s must be positive")
     tt = np.asarray(t, dtype=float)
     pos = np.clip(tt, 0.0, None)
-    shape = (1.0 - np.exp(-pos / rise_s)) * np.exp(-pos / decay_s)
-    t_peak = kernel_peak_time(rise_s, decay_s)
-    peak = (1.0 - np.exp(-t_peak / rise_s)) * np.exp(-t_peak / decay_s)
+    shape = (1.0 - np.exp(-pos / rise_s)) * np.exp(-pos / dec)
+    t_peak = kernel_peak_time(rise_s, dec)
+    peak = (1.0 - np.exp(-t_peak / rise_s)) * np.exp(-t_peak / dec)
     return np.where(tt >= 0.0, shape / peak, 0.0)
 
 

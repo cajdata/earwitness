@@ -1,1 +1,1 @@
-"""Thunder method: forward model (M1), search and refinement (M2)."""
+"""Thunder method: forward model (M1), search, refinement and pipeline (M2)."""
