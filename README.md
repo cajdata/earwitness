@@ -14,8 +14,8 @@ Full specification: [docs/HANDOFF.md](docs/HANDOFF.md).
 ## Status
 
 Pre-alpha. Both methods run end to end on real data (GOES GLM lightning, adsb.lol flights)
-and pass their synthetic acceptance checks; no real recording has been validated yet (that is
-M6).
+and pass their synthetic acceptance checks, and the desktop UI takes a recording from a file
+to a heat map for both; no real recording has been validated yet (that is M6).
 
 | Milestone | Scope | State |
 | --- | --- | --- |
@@ -24,8 +24,8 @@ M6).
 | M2 | Thunder pipeline on GOES GLM: loader, search, refinement, outputs | done, see [docs/VALIDATION.md](docs/VALIDATION.md) |
 | M3 | ADS-B data: adsb.lol loader, aircraft types, terrain | done |
 | M4 | Aircraft Doppler pipeline: events, funnel, scoring, outputs | done, see [docs/VALIDATION.md](docs/VALIDATION.md) |
-| M5 | Desktop UI | next |
-| M6 | Real-world validation | planned |
+| M5 | Desktop UI: local API, Vite front end, native window, audit mode | done, see [docs/VALIDATION.md](docs/VALIDATION.md) |
+| M6 | Real-world validation | next |
 | M7 | v0.1.0 release and site | planned |
 
 ## Responsible use
@@ -51,6 +51,31 @@ uv sync
 
 ```bash
 uv run earwitness --help
+```
+
+Check a recording of your own for location clues. The audit report says which clues it
+contains, what each could reveal, and what has been shown to help:
+
+```bash
+uv run earwitness audit recording.wav
+```
+
+Open the desktop UI: a local web app in a native window (`--browser` opens it in the system
+browser instead). It walks through audit, setup (file, method, dates, a search region drawn
+on a map), audio (spectrogram with band zoom, Doppler fit sliders, trace tool and silence
+windows for aircraft; the loudness envelope for thunder), run (cached data, options, a
+compute estimate, live log) and results (heat map, ranked list, score histogram, observed
+versus modeled overlays). Everything runs on this computer, on a random localhost port
+guarded by a session token.
+
+```bash
+uv run earwitness ui
+```
+
+From a source checkout, build the front end once first (Node 22; wheels from PyPI carry it):
+
+```bash
+cd ui && npm install && npm run build
 ```
 
 Generate synthetic test recordings with a known answer:

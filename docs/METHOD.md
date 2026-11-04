@@ -130,3 +130,60 @@ Implementation notes that differ from or sharpen the handoff:
   event with a known time yields the site and its reflection with equal scores. Track
   curvature, terrain, other aircraft in the silence windows or the region prior break the tie;
   a second event always does.
+
+## M5 implementation notes (desktop UI and audit)
+
+- Architecture: a FastAPI app (`server/app.py`) over the engine. Every route is an adapter
+  that validates a request and calls the same functions the CLI calls, in the same order
+  (`server/runs.py`), so a run started from the UI lands in `runs/` as the same folder a CLI
+  run writes and reproduces from it. Analyses run one at a time on a worker thread, and the
+  pipelines' progress callable appends to a line buffer the page polls by index
+  (`server/jobs.py`), so no connection stays open across a 20 minute search. The server binds
+  to 127.0.0.1 on a free port, and every API request must carry the session token the
+  launcher puts in the page URL (`server/launch.py`); a page in another tab, or a site using
+  DNS rebinding, cannot drive it or read local files through it. pywebview opens the page in a
+  native window with a small JavaScript bridge for file dialogs; `--browser` uses the system
+  browser instead, with a typed path in place of the dialog.
+- Front end (`ui/`): plain TypeScript built with Vite into `server/static/`, which is
+  gitignored and shipped in the wheel. MapLibre draws OpenStreetMap raster tiles with
+  attribution (the tile URL is a setting, blank for none), a two-click region rectangle, and
+  the heat map as score-coloured points with the ranked answers as numbered markers. Plotly
+  draws the spectrogram, the thunder envelope with wind-flagged spans shaded, the score
+  histogram and the observed-versus-modeled overlays. The server cuts every spectrogram view
+  to display size by block maxima, so a thin Doppler line survives the reduction, and
+  computes a finer transform when the band is narrow.
+- Doppler fit tool: auto-trace follows the line outward from the brightest frame in the box,
+  accepting a frame when it is at least 6 dB bright, 2 dB above the box's typical 2 s
+  brightness, and within 4% in frequency of the last accepted frame, and stopping once the
+  line has been missing for 1.5 s. Taking every bright frame in the box instead let noise
+  outnumber the line and dragged the fit to 22 m/s on the walk-through case. The fit is the
+  straight flyover of `core.physics.straight_line_doppler` by bounded least squares with a
+  soft-L1 loss (`aircraft/fit.py`). Its `events.json` ranges are each parameter plus or minus
+  the largest of three sigma, a floor (3 Hz, 10 m/s, 100 m, 3 s) and a fraction of the value
+  (30% of the speed, 50% of the distance): a straight line fitted to a real, curving track is
+  biased, these are the widths the M4 acceptance validated, and on the walk-through case the
+  fit gave 119.5 Hz, 44 m/s, 603 m and 547.4 s against a truth of 120.1 Hz, 46.9 m/s, 659 m
+  and 548.6 s.
+- Traced curves: a trace is saved with its event and reported per candidate as the RMS
+  distance of the modeled curve from it, over the points the track covers. It no longer
+  replaces the brightness score in single-event mode: that path was never exercised by the
+  acceptance harness, and it went NaN whenever a trace point fell past the leg's end, which
+  dropped the truth to rank 5 in the first UI run. The brightness score is what was validated.
+- Audit (`audit/report.py`): four detectors with their evidence next to the verdict. Metadata
+  reads container tags through ffprobe when it is installed and flags location and creation
+  time tags. Thunder counts bursts of the 20 to 250 Hz envelope (1 s smoothing) above the
+  median plus four robust sigmas, 0.75 to 90 s long. Aircraft follows the 55 to 190 Hz ridge,
+  keeps stretches that stay above 6 dB in a 2 s mean for at least 10 s, splits them at 12%
+  jumps, and counts those that fall by 2 to 60% with a time-frequency correlation below
+  -0.6. Mains hum compares Welch lines at 50 and 60 Hz and their harmonics with the median
+  power 1.2 to 6 Hz away. These are heuristics tuned on synthetic cases, not validated
+  classifiers; the report says so.
+- Compute estimate: the run panel scales the acceptance runs' timings (an aircraft two-event
+  search over 1.8 million km2 and a day took a median of 12 minutes, a known-time search about
+  a minute; the thunder coarse pass is cells times start times at about 2.5 microseconds
+  each) to the region and dates, as a guide to narrowing the priors, not a promise.
+- Limitations: a run cannot be cancelled (close the app); one run at a time; terrain must be
+  off for synthetic cases rendered on flat ground, since real heights move the modeled curves;
+  the coarse heat map's colour scale follows the coarse scores, so a thunder map looks
+  uniformly warm and the numbered markers carry the answer; the UI requires a region, by the
+  settled open decision, while the CLI can search the whole world.

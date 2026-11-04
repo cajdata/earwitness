@@ -11,7 +11,8 @@ larger). Frames whose sound the track does not cover count as zero brightness, s
 holds only the few seconds around closest approach is not scored on its peak alone. Event 1
 sweeps a small time correction and f0; that fixes the recording start, so event 2 sweeps f0
 only. In single-event known-time mode the time sweep is the known-time
-tolerance, and a traced curve, when given, is scored by closeness instead.
+tolerance; a traced curve, when given, is reported as the RMS distance of the modeled curve
+from it, a diagnostic that does not enter the score.
 """
 
 from __future__ import annotations
@@ -229,12 +230,21 @@ def trace_closeness(
     f0: float,
     cfg: ScoreConfig,
 ) -> float:
-    """Minus the RMS difference, Hz, between the modeled curve and the user's traced curve."""
+    """Minus the RMS difference, Hz, between the modeled curve and the user's traced curve.
+
+    Only trace points the track covers count; NaN with fewer than five of them. This is a
+    diagnostic for the overlays, not a score: the brightness score is what the acceptance runs
+    validated, and a trace is the user's reading of the same spectrogram.
+    """
     if event.trace is None or event.trace.shape[0] == 0:
         return float("nan")
     t_rec = event.trace[:, 0]
     ratio = frequency_ratio(track, observer_xyz, t_start + t_rec, cfg)
-    return -float(np.sqrt(np.mean((f0 * ratio - event.trace[:, 1]) ** 2)))
+    diff = f0 * ratio - event.trace[:, 1]
+    ok = np.isfinite(diff)
+    if ok.sum() < 5:
+        return float("nan")
+    return -float(np.sqrt(np.mean(diff[ok] ** 2)))
 
 
 @dataclass(frozen=True)
@@ -266,10 +276,8 @@ def score_candidate(
         results.append(score_event(index, track, observer_xyz, event, t_start, cfg, None))
     total = float(sum(r.score for r in results))
     trace_rms = float("nan")
-    if events.single_event and e1.trace is not None:
-        closeness = trace_closeness(tracks[0], observer_xyz, e1, t_start, first.f0_hz, cfg)
-        trace_rms = -closeness
-        total = closeness
+    if e1.trace is not None:
+        trace_rms = -trace_closeness(tracks[0], observer_xyz, e1, t_start, first.f0_hz, cfg)
     return CandidateScore(total, tuple(results), t_start, trace_rms)
 
 

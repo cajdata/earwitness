@@ -23,8 +23,15 @@ The full spec is docs/HANDOFF.md. Read it before changing anything in src/.
 - Open decisions (HANDOFF "Open decisions for Chris") are settled as the recommendation column,
   confirmed on 2026-11-03: Apache-2.0, CI on Windows plus Linux, local web UI, no global search
   in the UI, no Blitzortung adapter, no helicopters in v0.1.
-- Repo: https://github.com/cajdata/earwitness (public). Milestone state: M0 to M4 built; acceptance
-  results are in docs/VALIDATION.md. Next is M5 (desktop UI).
+- Repo: https://github.com/cajdata/earwitness (public). Milestone state: M0 to M5 built; acceptance
+  results are in docs/VALIDATION.md. Next is M6 (real-world validation).
+- UI: `ui/` is a Vite plus TypeScript front end (MapLibre GL JS, Plotly.js) with no framework.
+  `cd ui && npm install && npm run build` writes it into `src/earwitness/server/static/`
+  (gitignored, shipped in the wheel through hatch `artifacts`); CI and the release build it
+  with Node 22. For live front-end work run `uv run earwitness ui --serve --port 8765` and
+  `npm run dev` in `ui/`, which proxies `/api` to it. The server is FastAPI on uvicorn (the ASGI
+  server FastAPI needs, the one runtime addition to the handoff's stack) and the window is
+  pywebview; the test client needs httpx (dev only).
 - Data cache: `data/cache` (gitignored) or `EARWITNESS_CACHE`; GLM hours are a few MB each as
   Parquet. `scripts/m2_acceptance.py` rebuilds the M2 validation from real GLM data and
   `scripts/m4_acceptance.py` the M4 validation from a cached adsb.lol day (about ten minutes

@@ -4,6 +4,7 @@ import json
 from datetime import UTC, datetime
 
 import numpy as np
+import pytest
 
 from earwitness import cli
 from earwitness.aircraft.model import doppler_curve
@@ -232,10 +233,13 @@ def test_cli_simulate_aircraft_rejects_a_short_clip(tmp_path, capsys):
     assert "too short" in capsys.readouterr().err
 
 
-def test_cli_unimplemented_commands_exit_3(capsys):
-    assert cli.main(["audit", "x.wav"]) == 3
-    assert cli.main(["ui"]) == 3
-    assert "planned for" in capsys.readouterr().err
+def test_cli_audit_and_ui_commands_are_wired(capsys):
+    assert cli.main(["audit", "x.wav"]) == 2
+    assert "no such file" in capsys.readouterr().err
+    with pytest.raises(SystemExit) as info:
+        cli.main(["ui", "--help"])
+    assert info.value.code == 0
+    assert "--browser" in capsys.readouterr().out
 
 
 def test_track_sources_render_only_sound_the_track_covers():

@@ -1,7 +1,48 @@
 # Validation
 
-Results of the acceptance checks, synthetic first (M2, M4) and real recordings later (M6).
+Results of the acceptance checks, synthetic first (M2, M4, M5) and real recordings later (M6).
 Every number here comes from a run that can be repeated with the command shown.
+
+## M5: desktop UI, from a file to a heat map without the CLI
+
+Acceptance criterion (HANDOFF M5): a user can go from a file to a heat map for both methods
+without the CLI.
+
+Walk-through on 2026-11-04 in the UI alone (`earwitness ui`), with every input made through
+the pages: open the file by path, choose the method, set the date and draw or type the region,
+measure the flyover with the fit tools, run, read the results. Both run folders reproduce from
+their contents like any CLI run.
+
+| method | recording | set in the UI | rank-1 error | score, margin over rank 2 | runtime |
+| --- | --- | --- | --- | --- | --- |
+| aircraft, single-event known-time | M4 single-event case 1: synthetic flyovers rendered on real 2026-09-08 tracks beside a site at 40.0190, -86.2447 | date; known start 16:16:31.950Z; a 1.4 by 1.15 degree region (15,200 km2); terrain off, since the case was rendered on flat ground; silence soft, no windows | 12 m | 7.98 dB, 1.02 dB | 42 s |
+| thunder | a synthetic 30 minute clip beside the real 2025-05-16 storm (2,117 strikes heard) at 37.3750, -89.7450, start 23:00 UTC | date; a 2 by 1.95 degree region (38,300 km2); defaults | 320 m, start time exact | 0.990, 0.044 | 8 s |
+
+The aircraft event came from the UI's own tools: zoom to 90 to 140 Hz and 520 to 620 s,
+auto-trace (367 points along the sweep), fit (f0 119.5 Hz, 44 m/s, 603 m, t0 547.4 s, rms
+0.52 Hz, against a truth of 120.1 Hz, 46.9 m/s, 659 m and 548.6 s), then add the event with
+the fit's ranges. The audit report on the same file found the aircraft clue as likely (four
+falling sweeps, the brightest 123 to 107 Hz at 542 s) and thunder as weak (the flyovers also
+lift the low band); on the thunder clip the envelope view showed the storm's claps from 800 s
+on.
+
+Defects found and fixed during the walk-through, all in the code the UI exercised for the
+first time:
+
+- Auto-trace took every bright frame in the box, so noise outnumbered the line and the fit
+  gave 22 m/s. The tracer now follows the line outward from its brightest frame and stops
+  where it breaks.
+- The fit's `t0` range missed the truth by 0.4 s with 1 s floors. Range floors are now the
+  widths the M4 acceptance used (3 s, 3 Hz, 30% of the speed, 50% of the distance).
+- A traced curve replaced the brightness score in single-event mode and went NaN whenever a
+  trace point fell past the leg's end; the truth sat at rank 5 with a NaN total while flights
+  40 km away ranked first. The trace is a diagnostic now, and the brightness score decides.
+- Run files carried NaN values, which browsers reject; the server replaces them with null.
+- With terrain on, the real heights put this flat-ground synthetic case 2.8 dB lower at the
+  truth. That is an input mismatch, not a defect: real recordings keep terrain on.
+
+Not shown by this check: real recordings (M6), the pywebview window on Linux, and the ADS-B
+day download from the data panel, which was exercised only through the cached day.
 
 ## M4: aircraft Doppler pipeline (synthetic recordings on real flights)
 

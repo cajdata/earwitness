@@ -67,3 +67,29 @@ def test_short_legs_are_not_scored_on_their_peak_alone():
     clipped = score_event(index, short, ORIGIN, event, 0.0, cfg, None).score
     assert abs(full - 10.0) < 1e-6
     assert 0.0 < clipped < 0.4 * full
+
+
+def test_trace_closeness_ignores_uncovered_points_and_needs_five():
+    from earwitness.aircraft.score import trace_closeness
+    from earwitness.audio.events import FlyoverEvent, Range
+
+    tr = am.straight_track(50.0, 90.0, 300.0, 300.0, 600.0, 400.0, 800.0, 1.0)
+    observer = ORIGIN
+    cfg = ScoreConfig()
+    t_heard = 600.0 + 300.0 / cfg.speed_of_sound
+    t_cov = np.array([t_heard - 20.0, t_heard - 10.0, t_heard, t_heard + 10.0, t_heard + 20.0])
+    f_model = 100.0 * frequency_ratio(tr, observer, t_cov, cfg)
+    assert np.all(np.isfinite(f_model))
+    # five covered points plus three far beyond the track's end: the far ones do not count
+    t_all = np.concatenate([t_cov, [1500.0, 1600.0, 1700.0]])
+    f_all = np.concatenate([f_model + 1.0, [90.0, 90.0, 90.0]])
+    event = FlyoverEvent(
+        "e1", Range(t_heard - 3, t_heard + 3), Range(97, 103), Range(40, 60), Range(200, 400),
+        trace=np.column_stack([t_all, f_all]),
+    )  # fmt: skip
+    assert abs(trace_closeness(tr, observer, event, 0.0, 100.0, cfg) + 1.0) < 1e-6
+    short = FlyoverEvent(
+        "e1", Range(t_heard - 3, t_heard + 3), Range(97, 103), Range(40, 60), Range(200, 400),
+        trace=np.column_stack([t_all[:4], f_all[:4]]),
+    )  # fmt: skip
+    assert np.isnan(trace_closeness(tr, observer, short, 0.0, 100.0, cfg))

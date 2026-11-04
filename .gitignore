@@ -16,9 +16,10 @@ build/
 .ruff_cache/
 .mypy_cache/
 
-# UI (M5)
+# UI: dependencies and the built front end (rebuilt by `npm run build` in ui/, CI and the release)
 ui/node_modules/
 ui/dist/
+src/earwitness/server/static/
 
 # OS and editors
 .DS_Store

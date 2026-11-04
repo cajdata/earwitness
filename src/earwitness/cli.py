@@ -1,8 +1,7 @@
 """Command-line entry point: `earwitness <command>`. The planned surface is in docs/HANDOFF.md.
 
-Implemented: `simulate thunder|aircraft` (M1), `data glm` and `analyze thunder` (M2). The other
-commands exist so the help text shows the full shape of the tool, and exit with code 3 until
-their milestone lands.
+Implemented: `simulate thunder|aircraft` (M1), `data glm` and `analyze thunder` (M2), `data adsb`
+(M3), `analyze aircraft` (M4), `audit` and `ui` (M5).
 """
 
 from __future__ import annotations
@@ -23,7 +22,6 @@ if TYPE_CHECKING:
     from earwitness.simulate import MixOptions
     from earwitness.simulate.thunder_synth import Strike
 
-NOT_IMPLEMENTED = 3
 DEFAULT_RATE = 16000
 BBOX_HELP = "west south east north in degrees (or --bbox=w,s,e,n)"
 
@@ -54,12 +52,9 @@ def build_parser() -> argparse.ArgumentParser:
         ana_sub.add_parser("aircraft", help="prop-aircraft Doppler against ADS-B")
     )
 
-    audit = sub.add_parser("audit", help="report which location clues a recording contains")
-    audit.add_argument("file", help="local audio or video file")
-    audit.set_defaults(func=_not_implemented, milestone="M5")
+    _build_audit(sub.add_parser("audit", help="report which location clues a recording contains"))
 
-    ui = sub.add_parser("ui", help="open the desktop UI (M5)")
-    ui.set_defaults(func=_not_implemented, milestone="M5")
+    _build_ui(sub.add_parser("ui", help="open the desktop UI"))
     return parser
 
 
@@ -598,9 +593,51 @@ def _build_simulate_aircraft(p: argparse.ArgumentParser) -> None:
     p.set_defaults(func=_simulate_aircraft)
 
 
-def _not_implemented(args: argparse.Namespace) -> int:
-    print(f"earwitness: not implemented yet (planned for {args.milestone})", file=sys.stderr)
-    return NOT_IMPLEMENTED
+# ----------------------------------------------------------------------------- audit and ui
+
+
+def _build_audit(p: argparse.ArgumentParser) -> None:
+    p.add_argument("file", help="local audio or video file")
+    p.add_argument("--json", action="store_true", help="print the report as JSON")
+    p.set_defaults(func=_audit)
+
+
+def _audit(args: argparse.Namespace) -> int:
+    import json
+
+    from earwitness.audit.report import audit_file
+
+    recording = Path(args.file)
+    if not recording.exists():
+        print(f"earwitness: no such file {recording}", file=sys.stderr)
+        return 2
+    report = audit_file(recording)
+    if args.json:
+        print(json.dumps(report.to_dict(), indent=2))
+    else:
+        print(report.text())
+    return 0
+
+
+def _build_ui(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--cache", type=Path, default=None, help="cache root (default data/cache)")
+    p.add_argument("--runs-dir", type=Path, default=None, help="run folders (default runs/)")
+    p.add_argument("--port", type=int, default=None, help="localhost port (default: a free one)")
+    how = p.add_mutually_exclusive_group()
+    how.add_argument(
+        "--browser", action="store_true", help="open the system browser instead of a window"
+    )
+    how.add_argument(
+        "--serve", action="store_true", help="only run the API server (front-end development)"
+    )
+    p.set_defaults(func=_ui)
+
+
+def _ui(args: argparse.Namespace) -> int:
+    from earwitness.server.launch import launch
+
+    mode = "serve" if args.serve else "browser" if args.browser else "window"
+    return launch(cache=args.cache, runs_dir=args.runs_dir, port=args.port, mode=mode)
 
 
 def _seed_and_rng(seed: int | None) -> tuple[int, np.random.Generator]:
