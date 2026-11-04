@@ -76,20 +76,56 @@ Implementation notes that differ from or sharpen the handoff:
   the search region. Candidates live on a latitude/longitude lattice with metric spacing whose
   integer cell ids make the two-event spatial join a sorted-array intersection.
 - Funnel order: speed gate on the indexed samples; pair prefilter in (x, y, time shifted by the
-  gap) so a ball query finds flight pairs that meet in space in the right time order; distance
-  tubes laid across each flight at the lattice spacing between the lateral offsets the distance
-  range allows for the aircraft's height above ground, checked with the exact closest approach
-  of the 1 s track; timing join on cell ids with the gap tolerance; silence filter counting
-  other admitted flights within 4 km during the silent windows, never the candidate's own event
-  flights. Single-event mode replaces the pair with the known time plus tolerance.
+  gap) so a ball query finds flight pairs that meet in space in the right time order, keeping
+  one hint per pair per meeting place (two aircraft working the same airport meet many times,
+  and the tubes are only laid near each hint, so a single hint per pair would search the wrong
+  place, and stopping at 100000 hints in flight-index order, which the run log reports when it
+  happens); distance tubes laid across each flight at the lattice spacing between the lateral
+  offsets the distance range allows for the aircraft's height above ground, checked with the
+  exact closest approach of the 1 s track over the segment near the hint (or inside the
+  known-time window), so a long leg costs little per hint and a leg that passes the same place
+  twice answers with the pass in question; timing join on cell ids with the gap tolerance;
+  silence filter counting
+  other admitted flights whose slant range from the candidate (aircraft height against the
+  candidate's ground height) drops under 4 km while the recording was silent, judged at the
+  time the sound arrives, never the candidate's own event flights. In hard mode such
+  candidates are dropped; in soft mode each offending flight costs 3 dB of score, which is the
+  safer default when receiver coverage is thin or the silence marks are rough. Single-event
+  mode replaces the pair with the known time plus tolerance.
+- Track coverage: outside its sampled span a track continues in a straight line at the end
+  sample's velocity; the cubic spline is never extrapolated, because a cubic run a minute past
+  the data of a turning aircraft is tens of kilometers off. Reception times whose sound left
+  before a leg's first sample or after its last are unexplained frames in the scorer (zero
+  brightness, see Scoring), and the simulator renders nothing for them, so the two agree on
+  what a leg can be heard to do.
 - Scoring: the received frequency is f0 times a geometry-only ratio c / (c + v_r), computed once
   per candidate and flight on a 0.1 s grid; every (time shift, f0) pair in the sweep is a
-  resampling. The score is the mean whitened brightness (dB above the per-frequency median)
-  along the curve over a window around the measured closest approach. Event 1 sweeps time
-  and f0, which fixes the recording start; event 2 sweeps f0 only. A traced curve, when given
-  in single-event mode, is scored by minus the RMS frequency error instead.
+  resampling. The score is the whitened brightness (dB above the per-frequency median) along
+  the curve over a window around the measured closest approach, averaged over frames with
+  weights (closest slant / slant): the tone is loudest and its curve steepest near closest
+  approach, while in the faint far frames a wrong curve can wander across whatever else is
+  playing, which is how a plain mean let far-away pairs outscore the truth by 4 dB in busy
+  recordings. Frames whose sound the track does not cover count as zero brightness with their
+  full weight, not as missing frames: a leg cut at touchdown a few seconds after closest
+  approach would otherwise be scored on its three brightest frames alone, which is exactly
+  how circuit legs at distant airports outscored the truth. The frame average is then averaged
+  over the harmonics the user reports for the event (or the configured count, whichever is
+  larger) with weights 1/n; higher harmonics move n times as far in frequency, so they
+  separate curves that the fundamental alone cannot. Event 1 sweeps time and f0, which fixes the recording start;
+  event 2 sweeps f0 only. A traced curve, when given in single-event mode, is scored by minus
+  the RMS frequency error instead.
+- Acceptance harness (`scripts/m4_acceptance.py`): sites are placed a few hundred meters beside
+  real adsb.lol flights; every admitted flight that comes within 4.2 km of the site at any time
+  in the clip is rendered on its real track for the stretch its samples cover, and silence
+  windows are the recording-time gaps
+  between the arrival-time spans in which any rendered source was inside that radius. The
+  extra 200 m over the filter's 4 km keeps a careful user's silence marks conservative for a
+  candidate cell up to half a lattice diagonal from the site. Event flyovers must close in at
+  least 60 s from either end of the clip so the scoring window is complete.
 - Refinement: the best cell of each of the top flight pairs is re-scored on a 100 m grid
-  within 300 m; the heat map scores 100 m cells within 1.5 km of the best pairs.
+  within 300 m, then on a 25 m grid within 100 m of that best point (a 50 m error already costs
+  about a decibel near closest approach, where the ranking is decided); the heat map scores
+  100 m cells within 1.5 km of the best pairs.
 - Mirror ambiguity: one straight flyover is symmetric across its ground path, so a single
   event with a known time yields the site and its reflection with equal scores. Track
   curvature, terrain, other aircraft in the silence windows or the region prior break the tie;

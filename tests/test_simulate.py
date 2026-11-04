@@ -236,3 +236,47 @@ def test_cli_unimplemented_commands_exit_3(capsys):
     assert cli.main(["audit", "x.wav"]) == 3
     assert cli.main(["ui"]) == 3
     assert "planned for" in capsys.readouterr().err
+
+
+def test_track_sources_render_only_sound_the_track_covers():
+    from earwitness.aircraft.model import Track
+    from earwitness.simulate.aircraft_synth import TrackSource, synthesize_from_tracks
+
+    # a weaving aircraft whose leg starts 10 km west of the observer inside the clip
+    t = np.arange(400.0, 801.0)
+    enu = np.column_stack(
+        [
+            50.0 * (t - 600.0),
+            300.0 + 1500.0 * np.sin(2.0 * np.pi * (t - 400.0) / 300.0),
+            np.full(t.size, 300.0),
+        ]
+    )
+    track = Track(t, enu)
+    rate = 4000
+    t_start = 300.0
+    out = synthesize_from_tracks(
+        ORIGIN, t_start, 600.0, rate, [TrackSource(track, 120.0, harmonics=3)]
+    )
+    r_first = float(np.linalg.norm(track.position(400.0)))
+    first_heard = 400.0 - t_start + r_first / 343.0
+    # nothing before the first sample's sound can arrive, a strong tone around closest approach
+    assert np.all(out[: int((first_heard - 0.5) * rate)] == 0.0)
+    assert (
+        np.sqrt(
+            np.mean(out[int((first_heard + 1.0) * rate) : int((first_heard + 20.0) * rate)] ** 2)
+        )
+        > 0.0
+    )
+    cpa = 600.0 - t_start
+    near = out[int((cpa - 10.0) * rate) : int((cpa + 10.0) * rate)]
+    assert np.sqrt(np.mean(near**2)) > 0.2
+    # and the tone sits on the model there
+    spec = spectrogram(out, rate, nfft=4096, hop=1024, fmax=500.0)
+    model = doppler_curve(track, ORIGIN, t_start + spec.t, 120.0)
+    _, f_peak = ridge(spec, 120.0 * 343.0 / 393.0 * 0.95, 120.0 * 343.0 / 293.0 * 1.05)
+    sel = (
+        (spec.t > cpa - 20.0)
+        & (spec.t < cpa + 20.0)
+        & (np.abs(spec.t - (cpa + 300.0 / 343.0)) > 3.0)
+    )
+    assert np.median(np.abs(f_peak[sel] - model.f[sel])) < 1.0

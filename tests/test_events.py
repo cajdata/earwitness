@@ -105,3 +105,21 @@ def test_events_from_truth_picks_closest_flyovers_in_time_order():
     single = ev.events_from_truth(truth, max_events=1)
     assert single.single_event
     assert single.events[0].d_m.mid == 400.0
+
+
+def test_events_from_truth_uses_given_audible_intervals_and_edge_margin():
+    truth = {
+        "recording": {"file": "recording.wav", "duration_s": 1200.0},
+        "physics": {"speed_of_sound_mps": 343.0},
+        "audible_intervals_s": [[250.0, 360.0], [340.0, 700.0], [1150.0, 1300.0]],
+        "events": [
+            _flyover(300.0, 500.0, 80.0, 95.0),
+            _flyover(600.0, 2500.0, 60.0, 100.0),
+            _flyover(1180.0, 100.0, 60.0, 100.0),  # closest, but too near the end
+        ],
+    }
+    es = ev.events_from_truth(truth, max_events=1, harmonics=3, edge_margin_s=60.0)
+    assert es.events[0].t0_s.mid == 300.0
+    assert es.events[0].harmonics == 3
+    assert [(s.start_s, s.end_s) for s in es.silence] == [(0.0, 250.0), (700.0, 1150.0)]
+    assert ev.merge_spans([(5.0, 2.0), (-10.0, 20.0), (15.0, 30.0)], 25.0) == [(0.0, 25.0)]

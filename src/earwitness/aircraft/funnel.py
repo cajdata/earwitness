@@ -4,9 +4,9 @@ Speed gate: a flight can only be an event's source where its speed sits in the e
 Distance tube: candidates lie on a lattice where the flight's closest-approach slant distance is
 inside the event's range, with a hard cap. Timing pair: a candidate must sit in an event-1 tube
 and an event-2 tube whose heard closest-approach times differ by the observed gap. Silence
-filter: a candidate that would have heard another propeller aircraft during a window the
-recording shows as silent is dropped (or penalized). Single-event mode replaces the pair with
-the known recording time.
+filter: a candidate that would have heard another propeller aircraft (slant range under the
+silence distance, at arrival time) during a window the recording shows as silent is dropped, or
+penalized in soft mode. Single-event mode replaces the pair with the known recording time.
 
 Everything geometric runs in ECEF so no tangent plane has to cover the search region; the only
 planar structure is a lat/lon lattice with metric spacing whose cell ids make the spatial join a
@@ -43,14 +43,17 @@ class FunnelConfig:
     timing_tolerance_s: float = 5.0
     silence_distance_m: float = 4000.0
     silence_mode: str = "hard"
-    """'hard' drops candidates with silence hits, 'soft' keeps them with a count, 'off' skips."""
+    """'hard' drops candidates with silence hits, 'soft' subtracts `silence_penalty_db` per
+    offending flight from the score, 'off' skips the filter."""
+    silence_penalty_db: float = 3.0
     keep_classes: tuple[str, ...] = ("piston", "turboprop", "unknown")
     speed_of_sound: float = SPEED_OF_SOUND
     index_step_s: float = 5.0
     """Sample step of the spatial index used by the pair prefilter and the silence filter."""
     min_speed_mps: float = 20.0
     """Lower bound on speed used when converting distances to time slack."""
-    max_pairs: int = 20000
+    max_pairs: int = 100000
+    """Most pair hints the prefilter returns; the run log says when the cap truncated it."""
 
 
 class Lattice:
@@ -103,7 +106,11 @@ def cpa_to_points(
     rows = np.arange(pts.shape[0])
     dm, d0, dp = d2[rows, im], d2[rows, i], d2[rows, ip]
     denom = dm - 2.0 * d0 + dp
-    interior = (i > 0) & (i < n - 1) & (denom > 1e-9)
+    # the fit needs the nearest sample's true neighbors, not the far side of a gap left when
+    # the track was cut down to the segment near a hint
+    step = float(np.median(np.diff(track_t))) if n > 1 else 1.0
+    adjacent = (track_t[ip] - track_t[i] <= 1.5 * step) & (track_t[i] - track_t[im] <= 1.5 * step)
+    interior = (i > 0) & (i < n - 1) & (denom > 1e-9) & adjacent
     delta = np.where(interior, 0.5 * (dm - dp) / np.where(denom > 0, denom, 1.0), 0.0)
     delta = np.clip(delta, -1.0, 1.0)
     dt = np.where(interior, track_t[ip] - track_t[i], 0.0)
@@ -123,6 +130,8 @@ class FlightSet:
     sample_t: FloatArray
     sample_flight: IntArray
     sample_speed: FloatArray
+    sample_h: FloatArray
+    """Aircraft height above the ellipsoid at each indexed sample."""
     _tracks: dict[int, Track] = field(default_factory=dict, repr=False)
     _tree: cKDTree | None = field(default=None, repr=False)
 
@@ -138,7 +147,7 @@ class FlightSet:
         """Keep flights of the admitted classes that touch the time window; index every few s."""
         ref_lat, ref_lon = bbox.center
         kept: list[Flight] = []
-        xs, ts, fs, vs = [], [], [], []
+        xs, ts, fs, vs, hs = [], [], [], [], []
         for fl in flights:
             if fl.engine_class not in cfg.keep_classes:
                 continue
@@ -155,11 +164,11 @@ class FlightSet:
             ts.append(t)
             fs.append(np.full(t.size, idx, dtype=np.int64))
             vs.append(np.interp(t, fl.time_unix, fl.gs_mps))
+            hs.append(np.interp(t, fl.time_unix, fl.height_m))
         if not kept:
             empty = np.zeros((0, 2))
-            return cls(
-                kept, ref_lat, ref_lon, empty, np.zeros(0), np.zeros(0, np.int64), np.zeros(0)
-            )
+            zeros = np.zeros(0)
+            return cls(kept, ref_lat, ref_lon, empty, zeros, np.zeros(0, np.int64), zeros, zeros)
         return cls(
             kept,
             ref_lat,
@@ -168,6 +177,7 @@ class FlightSet:
             np.concatenate(ts),
             np.concatenate(fs),
             np.concatenate(vs),
+            np.concatenate(hs),
         )
 
     def __len__(self) -> int:
@@ -243,14 +253,26 @@ def tube_cells(
     h_ac = np.interp(t, fl.time_unix, fl.height_m)
     speed = np.interp(t, fl.time_unix, fl.gs_mps)
     keep = (speed >= event.v_mps.lo) & (speed <= event.v_mps.hi)
+    # the closest-approach search runs on the track segment that can hold the closest approach
+    # of any cell laid from the kept samples: the kept region plus two distance ranges; this
+    # is what makes a hint cheap on a long leg, and it keeps a leg that passes the same place
+    # twice from answering with its other pass
+    segment = np.ones(t.size, dtype=bool)
+    margin = 2.0 * d_hi + 2.0 * cfg.grid_spacing_m
     if t_window is not None:
         keep &= (t >= t_window[0]) & (t <= t_window[1])
+        pad = margin / max(event.v_mps.lo, cfg.min_speed_mps) + cfg.index_step_s
+        segment &= (t >= t_window[0] - pad) & (t <= t_window[1] + pad)
     if near_xy is not None and near_radius_m is not None:
         xy = fs.xy(lat, lon)
-        keep &= np.hypot(xy[:, 0] - near_xy[0], xy[:, 1] - near_xy[1]) <= near_radius_m
+        dist = np.hypot(xy[:, 0] - near_xy[0], xy[:, 1] - near_xy[1])
+        keep &= dist <= near_radius_m
+        segment &= dist <= near_radius_m + margin
     idx = np.flatnonzero(keep)
     if idx.size == 0:
         return empty
+    if segment.sum() < 3:
+        segment[:] = True
     stride = max(1, round(cfg.grid_spacing_m / max(float(np.median(speed[idx])), 1.0)))
     idx = idx[::stride]
     # unit lateral vector from the local heading
@@ -292,7 +314,7 @@ def tube_cells(
         return empty
     cg = ground_height(clat, clon) if ground_height is not None else np.zeros(ids.size)
     pts = geodesy.geodetic_to_ecef(clat, clon, cg)
-    t_cpa, slant = cpa_to_points(track.enu, track.t, pts)
+    t_cpa, slant = cpa_to_points(track.enu[segment], track.t[segment], pts)
     ok = (slant >= d_lo) & (slant <= d_hi)
     heard = t_cpa + slant / cfg.speed_of_sound
     return TubeCells(flight_idx, ids[ok], clat[ok], clon[ok], heard[ok], slant[ok])
@@ -322,27 +344,31 @@ class PairHint:
 def pair_prefilter(
     fs: FlightSet, e1: FlyoverEvent, e2: FlyoverEvent, gap: Range, cfg: FunnelConfig
 ) -> list[PairHint]:
-    """Flight pairs that could produce two flyovers `gap` apart at one point.
+    """Flight pairs that could produce two flyovers `gap` apart, and where they meet.
 
     Event-1 samples are indexed in (x, y, scaled time) with time shifted by the gap, so a ball
     query around each event-2 sample finds samples that are close in space and whose times
-    differ by the gap within the allowed slack.
+    differ by the gap within the allowed slack. One hint is kept per flight pair per meeting
+    place (coarse cells twice the reach wide): two aircraft working the same airport meet again
+    and again, and every meeting place has to be searched, not just the first one found. The
+    list stops at `cfg.max_pairs` hints, in index order, and the caller reports that.
     """
     m1 = speed_mask(fs, e1)
     m2 = speed_mask(fs, e2)
     if not m1.any() or not m2.any():
         return []
-    reach = 2.0 * min(max(e1.d_m.hi, e2.d_m.hi), cfg.max_distance_m) + cfg.grid_spacing_m
+    reach = pair_reach(e1, e2, cfg)
     v_min = max(min(e1.v_mps.lo, e2.v_mps.lo), cfg.min_speed_mps)
     slack = cfg.timing_tolerance_s + gap.half_width + reach / v_min + cfg.index_step_s
     scale = reach / slack
+    coarse = 2.0 * reach
     i1 = np.flatnonzero(m1)
     i2 = np.flatnonzero(m2)
     pts1 = np.column_stack([fs.sample_xy[i1], (fs.sample_t[i1] + gap.mid) * scale])
     pts2 = np.column_stack([fs.sample_xy[i2], fs.sample_t[i2] * scale])
     tree = cKDTree(pts1)
     hits = tree.query_ball_point(pts2, reach * np.sqrt(2.0))
-    pairs: dict[tuple[int, int], FloatArray] = {}
+    pairs: dict[tuple[int, int, int, int], FloatArray] = {}
     for q, lst in enumerate(hits):
         if not lst:
             continue
@@ -351,12 +377,18 @@ def pair_prefilter(
             f1 = int(fs.sample_flight[i1[h]])
             if f1 == f2:
                 continue
-            key = (f1, f2)
+            mid = 0.5 * (fs.sample_xy[i1[h]] + fs.sample_xy[i2[q]])
+            key = (f1, f2, int(np.floor(mid[0] / coarse)), int(np.floor(mid[1] / coarse)))
             if key not in pairs:
-                pairs[key] = 0.5 * (fs.sample_xy[i1[h]] + fs.sample_xy[i2[q]])
+                pairs[key] = mid
                 if len(pairs) >= cfg.max_pairs:
-                    return [PairHint(a, b, xy) for (a, b), xy in pairs.items()]
-    return [PairHint(a, b, xy) for (a, b), xy in pairs.items()]
+                    return [PairHint(k[0], k[1], xy) for k, xy in pairs.items()]
+    return [PairHint(k[0], k[1], xy) for k, xy in pairs.items()]
+
+
+def pair_reach(e1: FlyoverEvent, e2: FlyoverEvent, cfg: FunnelConfig) -> float:
+    """How far apart two flights can be while both pass within range of one point."""
+    return 2.0 * min(max(e1.d_m.hi, e2.d_m.hi), cfg.max_distance_m) + cfg.grid_spacing_m
 
 
 @dataclass
@@ -443,15 +475,20 @@ def two_event_candidates(
     ground_height: GroundHeight | None = None,
     progress: object | None = None,
 ) -> tuple[Candidates, int]:
-    """Speed gate, pair prefilter, distance tubes and timing join. Returns (candidates, pairs)."""
+    """Speed gate, pair prefilter, distance tubes and timing join. Returns (candidates, hints).
+
+    Each hint's tubes are restricted to the track segments near its meeting place (three times
+    the reach, which covers the far corner of a hint's coarse cell), so one pair of aircraft that
+    meet in several places costs one tube pass per place rather than a region-wide tube.
+    """
     hints = pair_prefilter(fs, e1, e2, gap, cfg)
-    reach = 2.0 * min(max(e1.d_m.hi, e2.d_m.hi), cfg.max_distance_m) + cfg.grid_spacing_m
+    radius = 3.0 * pair_reach(e1, e2, cfg)
     parts: list[Candidates] = []
     for k, hint in enumerate(hints, start=1):
-        tube1 = tube_cells(fs, hint.f1, e1, lattice, cfg, ground_height, hint.xy, reach * 2.0)
+        tube1 = tube_cells(fs, hint.f1, e1, lattice, cfg, ground_height, hint.xy, radius)
         if tube1.ids.size == 0:
             continue
-        tube2 = tube_cells(fs, hint.f2, e2, lattice, cfg, ground_height, hint.xy, reach * 2.0)
+        tube2 = tube_cells(fs, hint.f2, e2, lattice, cfg, ground_height, hint.xy, radius)
         if tube2.ids.size == 0:
             continue
         joined = timing_join(tube1, tube2, e1, gap, cfg)
@@ -459,7 +496,7 @@ def two_event_candidates(
             parts.append(joined)
         if progress is not None and k % 500 == 0:
             progress(
-                f"funnel: {k}/{len(hints)} flight pairs, {sum(len(p) for p in parts)} candidates"
+                f"funnel: {k}/{len(hints)} pair hints, {sum(len(p) for p in parts)} candidates"
             )
     return Candidates.concat(parts), len(hints)
 
@@ -507,26 +544,38 @@ def single_event_candidates(
 
 
 def silence_hits(
-    fs: FlightSet, cand: Candidates, windows: list[SilenceWindow], cfg: FunnelConfig
+    fs: FlightSet,
+    cand: Candidates,
+    windows: list[SilenceWindow],
+    cfg: FunnelConfig,
+    cand_height: FloatArray | None = None,
 ) -> IntArray:
     """Distinct flights within the silence distance of each candidate during its silent windows.
 
-    A candidate's own event flights are not counted: the user marked when they were heard, and a
+    Distance is the slant range from the candidate (at `cand_height` above the ellipsoid, zero
+    by default) to each indexed sample, and a sample counts at the time its sound arrives,
+    emission time plus travel time, because silence windows are marked in recording time. A
+    candidate's own event flights are not counted: the user marked when they were heard, and a
     few seconds of the same aircraft lingering at the edge of that window is not a contradiction.
     """
     if not windows or len(cand) == 0 or len(fs) == 0:
         return np.zeros(len(cand), dtype=np.int64)
     xy = fs.xy(cand.lat, cand.lon)
+    heights = np.zeros(len(cand)) if cand_height is None else np.asarray(cand_height, dtype=float)
     lists = fs.tree().query_ball_point(xy, cfg.silence_distance_m)
     out = np.zeros(len(cand), dtype=np.int64)
     for i, hits in enumerate(lists):
         if not hits:
             continue
         hits = np.asarray(hits, dtype=np.int64)
-        rel = fs.sample_t[hits] - cand.t_start[i]
-        inside = np.zeros(hits.size, dtype=bool)
+        horizontal = np.hypot(fs.sample_xy[hits, 0] - xy[i, 0], fs.sample_xy[hits, 1] - xy[i, 1])
+        slant = np.hypot(horizontal, fs.sample_h[hits] - heights[i])
+        rel = fs.sample_t[hits] + slant / cfg.speed_of_sound - cand.t_start[i]
+        inside = slant <= cfg.silence_distance_m
+        in_window = np.zeros(hits.size, dtype=bool)
         for w in windows:
-            inside |= (rel >= w.start_s) & (rel <= w.end_s)
+            in_window |= (rel >= w.start_s) & (rel <= w.end_s)
+        inside &= in_window
         if inside.any():
             others = np.unique(fs.sample_flight[hits[inside]])
             own = {int(cand.f1[i]), int(cand.f2[i])}

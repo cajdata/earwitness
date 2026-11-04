@@ -3,6 +3,144 @@
 Results of the acceptance checks, synthetic first (M2, M4) and real recordings later (M6).
 Every number here comes from a run that can be repeated with the command shown.
 
+## M4: aircraft Doppler pipeline (synthetic recordings on real flights)
+
+Acceptance criterion (HANDOFF M4): synthetic two-event cases recover the truth within 200 m
+ranked first in at least 8 of 10; single-event known-time cases do so in at least 6 of 10.
+Result: two-event 10 of 10, single-event 10 of 10.
+
+Harness: `scripts/m4_acceptance.py`. Each case places a site 150 to 700 m beside a real
+propeller flight from the cached adsb.lol day 2026-09-08 (the reference recording's date) in
+the region `-100,30,-85,42` (Texas to the Great Lakes, 53,576 legs, 30,533 admitted as piston,
+turboprop or unknown), starts a 20 minute clip so that the flight passes 2 to 18 minutes in,
+and renders every admitted flight that comes within 4.2 km of the site at any time in the clip
+on its real 1 s track, for the stretch its samples cover: exact Doppler curves with six
+harmonics and 1/r loudness at a random fundamental of 80 to 130 Hz, mixed with pink noise at
+-15 dB SNR. The measured events are the truth widened the way a careful user would set
+sliders: heard closest approach plus or minus 3 s, fundamental plus or minus 3 Hz, speed plus
+or minus 15%, distance plus or minus 50%, three harmonics reported, and silence windows
+wherever no rendered source was within earshot for at least 30 s (track-based, in arrival
+time). Two-event mode pairs the two closest flyovers whose closest approaches lie at least
+60 s inside the clip and at least 90 s apart; single-event mode takes the closest one and the
+true start time with a 1 s tolerance. The pipeline then searches the whole region and the
+whole day with default settings (hard silence filter at 4 km, flat ground), hiding the truth.
+
+Scores per case: distance of the rank-1 answer from the site; distance from the site's mirror
+image across the event flight's ground path (one straight flyover cannot tell the two apart);
+whether the right flights were paired; the number of candidate cells before and after the
+silence filter; how many cells of the true flight within 300 m of the site survived the
+funnel; the margin, which is the rank-1 score minus the best other flight pair's score in dB
+of whitened brightness; and runtime on one laptop core while other runs shared the machine.
+
+### Two-event mode: 10 of 10
+
+```bash
+uv run python scripts/m4_acceptance.py --date 2026-09-08 --bbox=-100,30,-85,42 --cases 10 --seed 1 --mode two --out runs/m4-two
+```
+
+| case | sources rendered | event flights | rank-1 error (m) | mirror (m) | pair correct | rank within 200 m | candidates | after silence | truth cells kept | margin (dB) | runtime (s) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 10 | a742ad P208 + a1e67a P208 | 19 | 452 | yes | 1 | 38,152 | 8,265 | 10 | 5.8 | 449 |
+| 2 | 11 | a35682 RV10 + aca944 (no type) | 16 | 250 | yes | 1 | 18,690 | 2,672 | 7 | 4.7 | 208 |
+| 3 | 6 | a27abf S22T, twice | 14 | 100 | yes | 1 | 33,137 | 2,383 | 7 | 6.9 | 224 |
+| 4 | 10 | a22079 C172 + a789f6 C172 | 11 | 715 | yes | 1 | 80,146 | 23,286 | 20 | 3.4 | 974 |
+| 5 | 2 | a9e5c3 C172 + a2a436 P28A | 23 | 307 | yes | 1 | 58,589 | 5,323 | 28 | 3.9 | 666 |
+| 6 | 4 | a208cf BE33 + a1fb42 C172 | 17 | 1,641 | yes | 1 | 25,560 | 7,094 | 20 | 4.1 | 729 |
+| 7 | 3 | ac3f13 PA46 + a9279f P28A | 12 | 299 | yes | 1 | 113,098 | 16,776 | 16 | 8.0 | 2,351 |
+| 8 | 4 | a1cbc9 C182, twice | 10 | 608 | yes | 1 | 97,282 | 9,237 | 11 | 6.8 | 711 |
+| 9 | 5 | a9e92e C172 + ad1cfe DA40 | 16 | 76 | yes | 1 | 137,031 | 20,118 | 17 | 2.1 | 1,862 |
+| 10 | 7 | a1a78b C172 + a3ad2f C172 | 13 | 1,211 | yes | 1 | 17,637 | 2,036 | 17 | 3.6 | 925 |
+
+Rank 1 within 200 m in 10 of 10, every answer within 25 m of the site and every pair
+correct. The margin over the best other flight pair runs from 2.1 dB (case 9) to 8.0 dB
+(case 7). The ten cases took 2 h 33 min together, 3.5 to 39 minutes each.
+
+The same ten recordings scored with a plain mean along the curve (every frame the track covers
+weighted equally, frames it does not cover skipped) and a single 100 m refinement reached 6 of
+10:
+
+| case | plain mean: rank-1 error (m) | plain mean: rank | final scoring: rank-1 error (m) |
+| --- | --- | --- | --- |
+| 1 | 962,378 | 3 | 19 |
+| 2 | 1,474,291 | 2 | 16 |
+| 3 | 38 | 1 | 14 |
+| 4 | 775,502 | 5 | 11 |
+| 5 | 77 | 1 | 23 |
+| 6 | 42 | 1 | 17 |
+| 7 | 12 | 1 | 12 |
+| 8 | 64 | 1 | 10 |
+| 9 | 90,459 | 2 | 16 |
+| 10 | 43 | 1 | 13 |
+
+Three of the four plain-mean winners were one aircraft paired with itself: short circuit legs
+at an airport hundreds of kilometres away whose track covered only a few seconds of each
+scoring window, so the leg was judged on its few brightest frames, and in a recording with ten
+rendered sources some tone is always bright somewhere. The truth, meanwhile, was diluted over
+faint far frames where a wrong curve wanders across whatever else is playing. Two changes to
+the score fixed this (docs/METHOD.md, Scoring): frames are weighted by (closest slant / slant),
+so the loud, steep stretch around closest approach decides, and a frame the track does not
+cover counts as zero brightness with full weight, so a leg explains a flyover only if it covers
+it. A second, 25 m refinement stage around the best 100 m cell took the typical error from
+about 40 m to about 15 m.
+
+Defects found on the way, all fixed before the runs above:
+
+- Track extrapolation. `Track` continued its cubic spline beyond the sampled span, which a few
+  minutes out placed the aircraft at absurd positions and frequencies. The synthesizer then
+  found no harmonic under the Nyquist frequency and silently rendered nothing for any source
+  whose leg began inside the clip far from the site, so two cases had an event sitting in
+  noise. The track now continues in a straight line at its end velocity, the simulator renders
+  only sound whose emission the track covers, and the scorer treats frames the track does not
+  cover as unexplained.
+- Pair hint cap. The pair prefilter returned its first 20,000 hints in index order, and two
+  cases' true pairs fell beyond that. The cap is now 100,000, the run log says when it is
+  reached, and the tube step computes closest approach over the track segment near each hint,
+  which paid for the extra hints.
+- Harness silence. The first single-event run scored 4 of 10 because the harness rendered only
+  flights whose closest approach fell inside the clip and marked silence from a straight-line
+  formula, so circling aircraft and aircraft closing in from just outside the clip were within
+  4 km during "silence" and the hard filter dropped the true site. The harness now renders
+  every flight within earshot and marks silence from the real tracks in arrival time; the
+  pipeline's filter was changed from ground distance at emission time to slant range at
+  arrival time, and a soft mode (`--silence soft`, 3 dB per offending flight) was added for
+  real recordings, where silence marks will never be exact.
+
+### Single-event known-time mode: 10 of 10
+
+```bash
+uv run python scripts/m4_acceptance.py --date 2026-09-08 --bbox=-100,30,-85,42 --cases 10 --seed 2 --mode single --out runs/m4-single
+```
+
+| case | sources rendered | event flight | rank-1 error (m) | mirror (m) | rank within 200 m | candidates | after silence | truth cells kept | margin (dB) | runtime (s) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 5 | a36c89 SR20 | 17 | 1,116 | 1 | 1,916 | 681 | 3 | 1.0 | 53 |
+| 2 | 1 | aaf094 C172 | 162 | 41 | 1 | 1,748 | 897 | 6 | 3.8 | 54 |
+| 3 | 5 | a8db4a RV7 | 3 | 13 | 1 | 3,014 | 1,480 | 7 | 1.7 | 62 |
+| 4 | 1 | a27312 S22T | 140 | 129 | 1 | 1,287 | 997 | 7 | 0.5 | 54 |
+| 5 | 5 | a7b11f DA40 | 37 | 661 | 1 | 3,597 | 1,345 | 3 | 1.3 | 64 |
+| 6 | 2 | a6d579 C172 | 14 | 663 | 1 | 990 | 426 | 6 | 4.3 | 48 |
+| 7 | 4 | a0a3ab C140 | 20 | 448 | 1 | 787 | 225 | 4 | 2.7 | 49 |
+| 8 | 2 | a2a688 C172 | 20 | 532 | 1 | 5,883 | 2,157 | 5 | 0.8 | 70 |
+| 9 | 1 | a579ca C182 | 9 | 1,195 | 1 | 3,777 | 1,808 | 7 | 4.7 | 65 |
+| 10 | 16 | ac881e P28A | 18 | 529 | 1 | 1,071 | 1,071 | 4 | 2.5 | 54 |
+
+Rank 1 within 200 m in 10 of 10; the ten cases took 10 min 20 s together. Cases 2 and 4 are
+single straight flyovers, and the answer sits between the site and its mirror (162 m from one
+and 41 m from the other, then 140 m and 129 m): one straight pass cannot tell the two sides of
+the track apart, and both appear in the top list. Three wins (cases 1, 4 and 8) are by less
+than 1 dB over a flight elsewhere in the region, so one event with a known start time narrows
+the search to a short list rather than a point, and the margin is the number to read. With
+the plain mean the same seed scored 8 of 10 (cases 5 and 8 lost to flights 275 and 432 km
+away, at rank 2); the frame weighting took it to 9 (case 8 then lost to a circuit leg
+1,175 km away) and the coverage rule to 10.
+
+What these runs do not show: the only interference rendered is other propeller flights, so
+wind, traffic, speech, reverberation, engine speed changes and recorder clock drift wait for
+real recordings in M6; silence windows are exact here, which makes the hard filter safe, while
+on real recordings the soft mode should be the default; and the two-event search over a 15 by
+12 degree region and a whole day took 3.5 to 40 minutes per case on one core, nearly all of it
+in the funnel, where a known start time or a narrower region brings it to about a minute.
+
 ## M3: aircraft data, one continental-US day (2026-09-08)
 
 Acceptance criterion (HANDOFF M3): one continental-US day processes end to end, and spot-checked

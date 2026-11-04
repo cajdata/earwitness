@@ -64,3 +64,23 @@ def test_track_validation():
         am.Track([0.0], np.zeros((1, 3)))
     with pytest.raises(ValueError, match="t_end"):
         am.straight_track(100.0, 0.0, 300.0, 0.0, 0.0, 10.0, 10.0)
+
+
+def test_track_continues_straight_beyond_its_span():
+    # a tight circle: a cubic extrapolated 100 s past the last sample would be tens of km off,
+    # while the straight-line continuation moves at the end speed in the end direction
+    t = np.arange(0.0, 63.0)
+    omega = 50.0 / 500.0
+    enu = np.column_stack(
+        [500.0 * np.cos(omega * t), 500.0 * np.sin(omega * t), np.full(t.size, 300.0)]
+    )
+    tr = am.Track(t, enu)
+    t1 = tr.span[1]
+    v_end = tr.velocity(t1)
+    np.testing.assert_allclose(tr.position(t1 + 100.0), tr.position(t1) + 100.0 * v_end, atol=1e-6)
+    np.testing.assert_allclose(tr.velocity(t1 + 100.0), v_end, atol=1e-9)
+    assert abs(float(tr.speed(t1 + 100.0)) - 50.0) < 0.5
+    v_start = tr.velocity(0.0)
+    np.testing.assert_allclose(tr.position(-30.0), tr.position(0.0) - 30.0 * v_start, atol=1e-6)
+    # inside the span nothing changed
+    np.testing.assert_allclose(tr.position(31.0), enu[31], atol=1e-9)

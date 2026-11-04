@@ -13,8 +13,9 @@ Full specification: [docs/HANDOFF.md](docs/HANDOFF.md).
 
 ## Status
 
-Pre-alpha. The thunder method runs end to end on real GOES GLM data and passes its synthetic
-acceptance check; no real recording has been validated yet (that is M6).
+Pre-alpha. Both methods run end to end on real data (GOES GLM lightning, adsb.lol flights)
+and pass their synthetic acceptance checks; no real recording has been validated yet (that is
+M6).
 
 | Milestone | Scope | State |
 | --- | --- | --- |
@@ -22,8 +23,8 @@ acceptance check; no real recording has been validated yet (that is M6).
 | M1 | Physics core, forward models, synthetic recordings (`earwitness simulate`) | done |
 | M2 | Thunder pipeline on GOES GLM: loader, search, refinement, outputs | done, see [docs/VALIDATION.md](docs/VALIDATION.md) |
 | M3 | ADS-B data: adsb.lol loader, aircraft types, terrain | done |
-| M4 | Aircraft Doppler pipeline | next |
-| M5 | Desktop UI | planned |
+| M4 | Aircraft Doppler pipeline: events, funnel, scoring, outputs | done, see [docs/VALIDATION.md](docs/VALIDATION.md) |
+| M5 | Desktop UI | next |
 | M6 | Real-world validation | planned |
 | M7 | v0.1.0 release and site | planned |
 
@@ -85,10 +86,20 @@ Cache one day of adsb.lol traces for a region (about 4 GB downloaded, a few hund
 uv run earwitness data adsb --date 2026-09-08 --bbox=-125,24,-66,50
 ```
 
+Locate a recording with two propeller flyovers against that day. The measured events (ranges
+for each flyover's heard closest-approach time, rest frequency, speed and distance, plus
+silence windows) come from an `events.json` file; its layout is documented at the top of
+`src/earwitness/audio/events.py`, and the simulator's `truth.json` can be turned into one for
+testing. With one flyover and a known recording start time, add `--known-time`:
+
+```bash
+uv run earwitness analyze aircraft recording.wav --events events.json --date 2026-09-08 --bbox=-100,30,-85,42 --out runs/aircraft
+```
+
 Write `--bbox=W,S,E,N` with the equals sign, or give the four numbers as separate arguments,
 so a negative western longitude is not mistaken for an option. Each analysis run writes a folder
-with `results.parquet`, `heatmap.geojson`, `histogram.json`, per-candidate overlays,
-`config.toml`, `priors.json`, `summary.json` and a run log.
+with `results.parquet`, `heatmap.geojson`, per-candidate overlays, `config.toml`,
+`summary.json` and a run log (the thunder run also writes `histogram.json` and `priors.json`).
 
 ## How it works
 

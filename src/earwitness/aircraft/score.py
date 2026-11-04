@@ -3,9 +3,14 @@
 For a candidate point and a flight, the received frequency is f0 times a geometry-only ratio
 c / (c + v_r(t)), so the ratio is computed once per candidate and flight on a fine time grid and
 every (time shift, f0) combination in the sweep is a cheap re-sampling. The score of a curve is
-the mean whitened brightness (dB above the per-frequency median) along it, optionally summed
-over harmonics. Event 1 sweeps a small time correction and f0; that fixes the recording start,
-so event 2 sweeps f0 only. In single-event known-time mode the time sweep is the known-time
+the whitened brightness (dB above the per-frequency median) along it, averaged over frames with
+weights (closest slant / slant)^p so the loud, steep stretch around closest approach counts most
+and the faint far frames, where whatever else is playing can be picked up, count little, then
+averaged over the harmonics with weights 1/n (the config's count or the event's, whichever is
+larger). Frames whose sound the track does not cover count as zero brightness, so a leg that
+holds only the few seconds around closest approach is not scored on its peak alone. Event 1
+sweeps a small time correction and f0; that fixes the recording start, so event 2 sweeps f0
+only. In single-event known-time mode the time sweep is the known-time
 tolerance, and a traced curve, when given, is scored by closeness instead.
 """
 
@@ -35,6 +40,9 @@ class ScoreConfig:
     f0_sweep_hz: float = 3.0
     f0_step_hz: float = 0.5
     harmonics: int = 1
+    """Harmonics to score, weighted 1/n; an event's own harmonic count wins when it is larger."""
+    distance_weight_power: float = 1.0
+    """Frames are weighted by (closest slant / slant) to this power; 0 gives the plain mean."""
     ratio_step_s: float = 0.1
     speed_of_sound: float = SPEED_OF_SOUND
     iterations: int = 5
@@ -80,20 +88,24 @@ class SpectrogramIndex:
         return np.where(valid, values, np.nan)
 
 
-def frequency_ratio(
+def curve_geometry(
     track: Track, observer_xyz: FloatArray, t_abs: FloatArray, cfg: ScoreConfig
-) -> FloatArray:
-    """Received over rest frequency, c / (c + v_r), at absolute reception times.
+) -> tuple[FloatArray, FloatArray]:
+    """Frequency ratio c / (c + v_r) and slant range at absolute reception times.
 
-    Times outside the track's span (allowing the acoustic delay) give NaN, so a leg that ends
-    inside a scoring window simply contributes fewer frames.
+    The ratio is NaN where the sound would have left before the track's first sample or after
+    its last: the data cannot say what the aircraft did there, so the scorer counts those
+    frames as unexplained. The slant range is still returned there, from the track's
+    straight-line continuation, so the frames keep their weight. Both are NaN more than a
+    minute beyond the span.
     """
     t_abs = np.asarray(t_abs, dtype=float)
     t0, t1 = track.span
-    inside = (t_abs >= t0) & (t_abs <= t1 + 60.0)
-    out = np.full(t_abs.shape, np.nan)
+    inside = (t_abs >= t0 - 60.0) & (t_abs <= t1 + 60.0)
+    ratio = np.full(t_abs.shape, np.nan)
+    slant = np.full(t_abs.shape, np.nan)
     if inside.any():
-        out[inside] = doppler_curve(
+        curve = doppler_curve(
             track.position,
             track.velocity,
             observer_xyz,
@@ -101,8 +113,41 @@ def frequency_ratio(
             1.0,
             c=cfg.speed_of_sound,
             iterations=cfg.iterations,
-        ).f
-    return out
+        )
+        covered = (curve.t_e >= t0) & (curve.t_e <= t1)
+        ratio[inside] = np.where(covered, curve.f, np.nan)
+        slant[inside] = curve.r
+    return ratio, slant
+
+
+def frequency_ratio(
+    track: Track, observer_xyz: FloatArray, t_abs: FloatArray, cfg: ScoreConfig
+) -> FloatArray:
+    """Received over rest frequency at absolute reception times; see `curve_geometry`."""
+    return curve_geometry(track, observer_xyz, t_abs, cfg)[0]
+
+
+def distance_weights(slant: FloatArray, cfg: ScoreConfig) -> FloatArray:
+    """Per-frame weights (closest slant / slant)^p, NaN where the track does not cover the frame.
+
+    The tone is loudest and its curve steepest near closest approach; far frames carry faint
+    sound and whatever else is playing, so a plain mean lets a wrong curve collect brightness
+    from other tones there.
+    """
+    finite = np.isfinite(slant)
+    if cfg.distance_weight_power <= 0.0 or not finite.any():
+        return np.where(finite, 1.0, np.nan)
+    nearest = float(np.min(slant[finite]))
+    power = cfg.distance_weight_power
+    return np.where(finite, (nearest / np.maximum(slant, 1.0)) ** power, np.nan)
+
+
+def weighted_mean(values: FloatArray, weights: FloatArray) -> FloatArray:
+    """Weighted mean over the last axis, ignoring NaN values or weights; NaN when nothing counts."""
+    ok = np.isfinite(values) & np.isfinite(weights)
+    num = np.where(ok, values * weights, 0.0).sum(axis=-1)
+    den = np.where(ok, weights, 0.0).sum(axis=-1)
+    return np.where(den > 0.0, num / np.where(den > 0.0, den, 1.0), np.nan)
 
 
 @dataclass(frozen=True)
@@ -134,16 +179,20 @@ def _sweep(
     t_abs_lo = float(t_start_options.min() + t_rec[0] - cfg.ratio_step_s)
     t_abs_hi = float(t_start_options.max() + t_rec[-1] + cfg.ratio_step_s)
     grid = np.arange(t_abs_lo, t_abs_hi + cfg.ratio_step_s, cfg.ratio_step_s)
-    ratio = frequency_ratio(track, observer_xyz, grid, cfg)
+    ratio, slant = curve_geometry(track, observer_xyz, grid, cfg)
     scores = np.empty((t_start_options.size, f0s.size))
-    weights = np.array([1.0 / n for n in range(1, cfg.harmonics + 1)])
+    n_harmonics = max(cfg.harmonics, event.harmonics, 1)
+    weights = np.array([1.0 / n for n in range(1, n_harmonics + 1)])
     for i, t0 in enumerate(t_start_options):
         r = np.interp(t0 + t_rec, grid, ratio)
+        frame_w = distance_weights(np.interp(t0 + t_rec, grid, slant), cfg)[None, :]
         total = np.zeros(f0s.size)
         for n, w in enumerate(weights, start=1):
             f = f0s[:, None] * (n * r[None, :])
             b = index.brightness(t_rec[None, :], f)
-            total += w * np.nanmean(b, axis=1)
+            # a frame the track does not cover explains nothing: zero brightness, full weight
+            b = np.where(np.isnan(f) & np.isfinite(frame_w), 0.0, b)
+            total += w * weighted_mean(b, frame_w)
         scores[i] = total / weights.sum()
     return scores, t_start_options, f0s
 

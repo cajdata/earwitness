@@ -200,16 +200,11 @@ class EventSet:
         return cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
 
 
-def audible_intervals(
-    t_heard_cpa: FloatArray, half_widths: FloatArray, duration_s: float
-) -> list[tuple[float, float]]:
-    """Merge per-flyover audible intervals [t - w, t + w], clipped to the clip, sorted."""
-    spans = sorted(
-        (max(0.0, float(t - w)), min(duration_s, float(t + w)))
-        for t, w in zip(t_heard_cpa, half_widths, strict=True)
-    )
+def merge_spans(spans: list[tuple[float, float]], duration_s: float) -> list[tuple[float, float]]:
+    """Clip spans to [0, duration], drop empty ones, and merge overlaps; sorted."""
+    clipped = sorted((max(0.0, float(a)), min(duration_s, float(b))) for a, b in spans)
     merged: list[tuple[float, float]] = []
-    for a, b in spans:
+    for a, b in clipped:
         if b <= a:
             continue
         if merged and a <= merged[-1][1]:
@@ -217,6 +212,16 @@ def audible_intervals(
         else:
             merged.append((a, b))
     return merged
+
+
+def audible_intervals(
+    t_heard_cpa: FloatArray, half_widths: FloatArray, duration_s: float
+) -> list[tuple[float, float]]:
+    """Merge per-flyover audible intervals [t - w, t + w], clipped to the clip, sorted."""
+    return merge_spans(
+        [(float(t - w), float(t + w)) for t, w in zip(t_heard_cpa, half_widths, strict=True)],
+        duration_s,
+    )
 
 
 def silence_between(
@@ -243,19 +248,24 @@ def events_from_truth(
     d_fraction: float = 0.5,
     audible_range_m: float = 4000.0,
     silence_min_s: float = 30.0,
+    harmonics: int = 1,
+    edge_margin_s: float = 0.0,
 ) -> EventSet:
     """Measurement ranges around a simulator's truth, the way a careful user would set them.
 
-    Picks the `max_events` closest flyovers (smallest slant distance) in time order, widens each
-    truth value into a range, and marks as silence the gaps between the intervals in which any
-    flyover was within `audible_range_m` (the funnel's silence distance by default).
+    Picks the `max_events` closest flyovers (smallest slant distance) whose heard closest
+    approach lies at least `edge_margin_s` inside the clip, in time order, widens each truth
+    value into a range, and marks as silence the gaps between the audible intervals. When the
+    truth carries `audible_intervals_s` (recording-time spans in which any rendered source was
+    within earshot, as the track-based harness writes them) those are used; otherwise each
+    flyover is assumed straight and uniform and audible within `audible_range_m`.
     """
-    flyovers = [e for e in truth["events"] if e.get("kind") == "flyover"]  # type: ignore[index]
+    all_flyovers = [e for e in truth["events"] if e.get("kind") == "flyover"]  # type: ignore[index]
     duration = float(truth["recording"]["duration_s"])  # type: ignore[index]
     speed_of_sound = float(truth.get("physics", {}).get("speed_of_sound_mps", 343.0))  # type: ignore[union-attr]
-    heard = np.array([float(e["cpa_heard_time_s"]) for e in flyovers])
-    in_clip = (heard > 0.0) & (heard < duration)
-    flyovers = [e for e, ok in zip(flyovers, in_clip, strict=True) if ok]
+    heard = np.array([float(e["cpa_heard_time_s"]) for e in all_flyovers])
+    in_clip = (heard > edge_margin_s) & (heard < duration - edge_margin_s)
+    flyovers = [e for e, ok in zip(all_flyovers, in_clip, strict=True) if ok]
     if not flyovers:
         raise ValueError("truth has no flyover inside the clip")
     chosen = sorted(flyovers, key=lambda e: float(e["cpa_slant_m"]))[:max_events]
@@ -271,14 +281,19 @@ def events_from_truth(
                 f0_hz=Range.around(float(e["f0_hz"]), f0_half_width_hz, lo_floor=1.0),
                 v_mps=Range(v * (1.0 - v_fraction), v * (1.0 + v_fraction)),
                 d_m=Range(max(d * (1.0 - d_fraction), 10.0), d * (1.0 + d_fraction)),
-                harmonics=1,
+                harmonics=max(int(harmonics), 1),
             )
         )
-    heard_all = np.array([float(e["cpa_heard_time_s"]) for e in flyovers])
-    slants = np.array([float(e["cpa_slant_m"]) for e in flyovers])
-    speeds = np.array([float(e["speed_mps"]) for e in flyovers])
-    half = np.sqrt(np.maximum(audible_range_m**2 - slants**2, 0.0)) / np.maximum(speeds, 1.0)
-    half += audible_range_m / speed_of_sound
-    silence = silence_between(audible_intervals(heard_all, half, duration), duration, silence_min_s)
+    given = truth.get("audible_intervals_s")
+    if given:
+        audible = merge_spans([(float(a), float(b)) for a, b in given], duration)  # type: ignore[union-attr]
+    else:
+        heard_all = np.array([float(e["cpa_heard_time_s"]) for e in all_flyovers])
+        slants = np.array([float(e["cpa_slant_m"]) for e in all_flyovers])
+        speeds = np.array([float(e["speed_mps"]) for e in all_flyovers])
+        half = np.sqrt(np.maximum(audible_range_m**2 - slants**2, 0.0)) / np.maximum(speeds, 1.0)
+        half += audible_range_m / speed_of_sound
+        audible = audible_intervals(heard_all, half, duration)
+    silence = silence_between(audible, duration, silence_min_s)
     recording = dict(truth.get("recording", {}))  # type: ignore[arg-type]
     return EventSet(events=events, silence=silence, recording=recording)

@@ -123,7 +123,7 @@ def _render_tone(
     amp_c = np.minimum(reference_m / curve.r, 1.0)
     i0 = int(np.ceil(t_lo * rate))
     i1 = min(int(np.floor(t_hi * rate)), out.size)
-    f_max = float(np.max(curve.f))
+    f_max = float(np.nanmax(curve.f))
     weights = [
         (n, n**-flyover.harmonic_rolloff)
         for n in range(1, flyover.harmonics + 1)
@@ -191,17 +191,30 @@ def synthesize_from_tracks(
     out = np.zeros(n)
     for src in sources:
         a, b = src.track.span
-        lo = max(0.0, a - t_start_unix + 2.0)
-        hi = min(duration_s, b - t_start_unix - 2.0)
+        # sound emitted at the last sample is still arriving up to a minute later
+        lo = max(0.0, a - t_start_unix)
+        hi = min(duration_s, b - t_start_unix + 60.0)
         if hi <= lo:
             continue
         t_c = np.arange(lo, hi + coarse_dt_s, coarse_dt_s)
         curve = doppler_curve(
             src.track, observer_xyz, t_start_unix + t_c, src.f0_hz, c=speed_of_sound
         )
-        shifted = DopplerCurve(t_r=t_c, t_e=curve.t_e, r=curve.r, v_r=curve.v_r, f=curve.f)
+        # render only reception times whose sound left while the track has data: a path
+        # continued beyond its samples is a guess, and the search models the same limits
+        covered = np.flatnonzero((curve.t_e >= a) & (curve.t_e <= b) & np.isfinite(curve.f))
+        if covered.size < 2:
+            continue
+        s0, s1 = int(covered[0]), int(covered[-1]) + 1
+        shifted = DopplerCurve(
+            t_r=t_c[s0:s1],
+            t_e=curve.t_e[s0:s1],
+            r=curve.r[s0:s1],
+            v_r=curve.v_r[s0:s1],
+            f=curve.f[s0:s1],
+        )
         stand_in = Flyover(0.0, 0.0, 0.0, 0.0, 0.0, src.f0_hz, src.harmonics, src.harmonic_rolloff)
-        _render_tone(out, rate, lo, hi, shifted, stand_in, reference_m)
+        _render_tone(out, rate, float(t_c[s0]), float(t_c[s1 - 1]), shifted, stand_in, reference_m)
     return out
 
 

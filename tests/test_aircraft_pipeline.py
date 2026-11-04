@@ -7,6 +7,7 @@ import numpy as np
 
 from earwitness import cli
 from earwitness.aircraft import model as am
+from earwitness.aircraft.funnel import FunnelConfig
 from earwitness.aircraft.pipeline import (
     AircraftPipelineConfig,
     AircraftPriors,
@@ -87,6 +88,32 @@ def test_two_event_pipeline_recovers_the_site(tmp_path):
     overlay = json.loads((run / "overlays" / "rank_01.json").read_text())
     assert len(overlay["curves"]) == 2
     assert overlay["curves"][0]["modeled_hz"]
+
+
+def test_soft_silence_mode_penalizes_instead_of_dropping(tmp_path):
+    case, truth, flights = _case(tmp_path, seed=24)
+    events = events_from_truth(truth)
+    priors = AircraftPriors(
+        START - timedelta(minutes=10), START + timedelta(minutes=10), BBox.around(LAT, LON, 15000.0)
+    )
+    cfg = AircraftPipelineConfig(
+        funnel=FunnelConfig(silence_mode="soft", silence_penalty_db=3.0),
+        use_terrain=False,
+        top_pairs=5,
+        heatmap_pairs=1,
+    )
+    summary = analyze_aircraft(
+        case / "recording.wav", events, flights, priors, tmp_path / "soft", cfg
+    )
+    counts = summary["counts"]
+    assert counts["after_silence"] == counts["candidates"]  # nothing dropped
+    top = summary["top"]
+    assert distance_to(summary, LAT, LON)[0] < 200.0
+    assert top[0]["silence_penalty_db"] == 0.0
+    assert all("silence_penalty_db" in t for t in top)
+    assert all(
+        t["score"] <= t["coarse_score"] + 1e-9 or t["silence_penalty_db"] == 0.0 for t in top
+    )
 
 
 def test_single_event_known_time_recovers_the_site(tmp_path):

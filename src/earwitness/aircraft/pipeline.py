@@ -1,9 +1,10 @@
 """End-to-end aircraft analysis: recording, measured events and a day of flights to a run folder.
 
 Stages: whitened spectrogram, flight set over the region, candidate funnel (two-event pair mode
-or single-event known-time mode), silence filter, exact-curve scoring of every candidate,
-grouping by flight pair, 100 m refinement of the best pairs, and outputs (results.parquet,
-heatmap.geojson, overlays with modeled curves, summary, run log).
+or single-event known-time mode), silence filter (hard cut, or a score penalty in soft mode),
+exact-curve scoring of every candidate, grouping by flight pair, two-stage refinement (100 m,
+then 25 m) of the best pairs, and outputs (results.parquet, heatmap.geojson, overlays with
+modeled curves, summary, run log).
 """
 
 from __future__ import annotations
@@ -76,6 +77,8 @@ class AircraftPipelineConfig:
     top_pairs: int = 10
     refine_spacing_m: float = 100.0
     refine_half_extent_m: float = 300.0
+    refine_fine_spacing_m: float = 25.0
+    refine_fine_half_extent_m: float = 100.0
     heatmap_pairs: int = 3
     heatmap_half_extent_m: float = 1500.0
     max_candidates: int = 30000
@@ -105,6 +108,37 @@ def _score_rows(
             )
         )
     return out
+
+
+def _refine_around(
+    index: SpectrogramIndex,
+    fs: FlightSet,
+    cand: Candidates,
+    i: int,
+    lat0: float,
+    lon0: float,
+    half_extent_m: float,
+    spacing_m: float,
+    ground: GroundHeight,
+    events: EventSet,
+    cfg: AircraftPipelineConfig,
+    time_sweep_s: float | None,
+    penalty_db: float,
+) -> tuple[FloatArray, FloatArray, list[CandidateScore], FloatArray]:
+    """Score candidate `i`'s flights on a local grid around a point.
+
+    Returns (lat, lon, scores, totals with the silence penalty applied).
+    """
+    rlat, rlon = local_grid(lat0, lon0, half_extent_m, spacing_m)
+    sub = Candidates(
+        cell=np.full(rlat.size, cand.cell[i]), lat=rlat, lon=rlon,
+        f1=np.full(rlat.size, cand.f1[i]), f2=np.full(rlat.size, cand.f2[i]),
+        heard1=np.full(rlat.size, cand.heard1[i]), heard2=np.full(rlat.size, cand.heard2[i]),
+        slant1=np.full(rlat.size, cand.slant1[i]), slant2=np.full(rlat.size, cand.slant2[i]),
+        t_start=np.full(rlat.size, cand.t_start[i]),
+    )  # fmt: skip
+    rs = _score_rows(index, fs, sub, rlat, rlon, ground(rlat, rlon), events, cfg, time_sweep_s)
+    return rlat, rlon, rs, np.array([s.total for s in rs]) - penalty_db
 
 
 def _flight_label(fs: FlightSet, idx: int) -> dict[str, object]:
@@ -187,19 +221,22 @@ def analyze_aircraft(
             ground,
             log.log,
         )
+    capped = not events.single_event and n_pairs >= cfg.funnel.max_pairs
     log.log(
         f"funnel: {n_pairs} flight pairs, {len(cand)} candidate cells "
         f"in {time.perf_counter() - t0:.1f} s"
+        + (" (pair cap reached; raise max_pairs or narrow the priors)" if capped else "")
     )
     counts: dict[str, int] = {"flights": len(fs), "pairs": n_pairs, "candidates": len(cand)}
 
+    heights = ground(cand.lat, cand.lon)
     if cfg.funnel.silence_mode != "off" and events.silence and len(cand):
-        hits = silence_hits(fs, cand, events.silence, cfg.funnel)
+        hits = silence_hits(fs, cand, events.silence, cfg.funnel, heights)
         cand.silence_hits = hits
         if cfg.funnel.silence_mode == "hard":
             keep = hits == 0
             cand = cand.subset(keep)
-            cand.silence_hits = hits[keep]
+            heights = heights[keep]
         log.log(
             f"silence filter ({cfg.funnel.silence_mode}): {int((hits > 0).sum())} with hits, "
             f"{len(cand)} kept"
@@ -209,7 +246,12 @@ def analyze_aircraft(
         rng = np.random.default_rng(0)
         pick = np.sort(rng.choice(len(cand), cfg.max_candidates, replace=False))
         cand = cand.subset(pick)
+        heights = heights[pick]
         log.log(f"capped to {cfg.max_candidates} candidates")
+    # soft mode keeps candidates with silence hits but ranks them lower
+    penalty = np.zeros(len(cand))
+    if cfg.funnel.silence_mode == "soft" and cand.silence_hits.size == len(cand):
+        penalty = cfg.funnel.silence_penalty_db * cand.silence_hits.astype(float)
 
     time_sweep = (
         events.known_time_tolerance_s + events.events[0].t0_s.half_width
@@ -217,9 +259,8 @@ def analyze_aircraft(
         else None
     )
     t0 = time.perf_counter()
-    heights = ground(cand.lat, cand.lon)
     scores = _score_rows(index, fs, cand, cand.lat, cand.lon, heights, events, cfg, time_sweep)
-    total = np.array([s.total for s in scores]) if scores else np.zeros(0)
+    total = np.array([s.total for s in scores]) - penalty if scores else np.zeros(0)
     log.log(f"scored {len(cand)} candidates in {time.perf_counter() - t0:.1f} s")
 
     # group by flight pair: best cell per pair
@@ -231,31 +272,34 @@ def analyze_aircraft(
             best_per_pair[k] = int(i)
     ranked = sorted(best_per_pair.values(), key=lambda i: -total[i])[: cfg.top_pairs]
 
-    # 100 m refinement around each top pair's best cell
+    # refinement around each top pair's best cell: 100 m within 300 m, then 25 m within 100 m
+    # of that best point, since a 50 m error already costs about a decibel near closest approach
     t0 = time.perf_counter()
     finals: list[dict[str, object]] = []
     for rank, i in enumerate(ranked, start=1):
-        rlat, rlon = local_grid(
-            float(cand.lat[i]), float(cand.lon[i]), cfg.refine_half_extent_m, cfg.refine_spacing_m
-        )
-        sub = Candidates(
-            cell=np.full(rlat.size, cand.cell[i]), lat=rlat, lon=rlon,
-            f1=np.full(rlat.size, cand.f1[i]), f2=np.full(rlat.size, cand.f2[i]),
-            heard1=np.full(rlat.size, cand.heard1[i]), heard2=np.full(rlat.size, cand.heard2[i]),
-            slant1=np.full(rlat.size, cand.slant1[i]), slant2=np.full(rlat.size, cand.slant2[i]),
-            t_start=np.full(rlat.size, cand.t_start[i]),
+        rlat, rlon, rs, rt = _refine_around(
+            index, fs, cand, int(i), float(cand.lat[i]), float(cand.lon[i]),
+            cfg.refine_half_extent_m, cfg.refine_spacing_m, ground, events, cfg, time_sweep,
+            float(penalty[i]),
         )  # fmt: skip
-        rs = _score_rows(index, fs, sub, rlat, rlon, ground(rlat, rlon), events, cfg, time_sweep)
-        rt = np.array([s.total for s in rs])
         j = int(np.argmax(rt))
+        flat, flon, fine, ft = _refine_around(
+            index, fs, cand, int(i), float(rlat[j]), float(rlon[j]),
+            cfg.refine_fine_half_extent_m, cfg.refine_fine_spacing_m, ground, events, cfg,
+            time_sweep, float(penalty[i]),
+        )  # fmt: skip
+        k = int(np.argmax(ft))
+        if ft[k] >= rt[j]:
+            rlat, rlon, rs, rt, j = flat, flon, fine, ft, k
         best = rs[j]
         finals.append(
             {
                 "rank": rank,
                 "lat": float(rlat[j]),
                 "lon": float(rlon[j]),
-                "score": float(best.total),
+                "score": float(rt[j]),
                 "coarse_score": float(total[i]),
+                "silence_penalty_db": float(penalty[i]),
                 "event_scores": [float(e.score) for e in best.events],
                 "f0_hz": [float(e.f0_hz) for e in best.events],
                 "time_shift_s": float(best.events[0].dt_s),
@@ -318,7 +362,7 @@ def analyze_aircraft(
                     "properties": {
                         "stage": "heatmap",
                         "rank": d["rank"],
-                        "score": round(float(s.total), 3),
+                        "score": round(float(s.total - penalty[i]), 3),
                     },
                 }
             )

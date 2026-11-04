@@ -26,8 +26,9 @@ class Track:
     Times are seconds in whatever base the caller uses (recording-relative for synthetic cases,
     Unix seconds for real traces). Positions are relative to a reference point, normally the
     candidate observer or a regional origin. A cubic spline gives continuous velocity between the
-    1 s ADS-B samples; it extrapolates linearly, so emission times slightly before the first
-    sample are still defined.
+    1 s ADS-B samples. Beyond the sampled span the path continues in a straight line at the end
+    sample's velocity, so emission times slightly before the first sample are still defined and
+    never run off a cubic extrapolation.
     """
 
     def __init__(self, t: ArrayLike, enu: ArrayLike, icao: str = "", type_code: str = "") -> None:
@@ -50,12 +51,23 @@ class Track:
         return float(self.t[0]), float(self.t[-1])
 
     def position(self, t: ArrayLike) -> FloatArray:
-        """ENU position at the given times, shape (..., 3)."""
-        return self._spline(np.asarray(t, dtype=float))
+        """ENU position at the given times, shape (..., 3); straight-line beyond the span."""
+        t = np.asarray(t, dtype=float)
+        t0, t1 = self.span
+        pos = self._spline(np.clip(t, t0, t1))
+        before = t < t0
+        after = t > t1
+        if before.any():
+            pos = pos + np.where(before[..., None], (t - t0)[..., None] * self._velocity(t0), 0.0)
+        if after.any():
+            pos = pos + np.where(after[..., None], (t - t1)[..., None] * self._velocity(t1), 0.0)
+        return pos
 
     def velocity(self, t: ArrayLike) -> FloatArray:
-        """ENU velocity at the given times, shape (..., 3), m/s."""
-        return self._velocity(np.asarray(t, dtype=float))
+        """ENU velocity at the given times, shape (..., 3), m/s; constant beyond the span."""
+        t = np.asarray(t, dtype=float)
+        t0, t1 = self.span
+        return self._velocity(np.clip(t, t0, t1))
 
     def speed(self, t: ArrayLike) -> FloatArray:
         """Speed at the given times, m/s."""

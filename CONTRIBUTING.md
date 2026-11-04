@@ -23,7 +23,9 @@ The full spec is docs/HANDOFF.md. Read it before changing anything in src/.
 - Open decisions (HANDOFF "Open decisions for Chris") are settled as the recommendation column,
   confirmed on 2026-11-03: Apache-2.0, CI on Windows plus Linux, local web UI, no global search
   in the UI, no Blitzortung adapter, no helicopters in v0.1.
-- Repo: https://github.com/cajdata/earwitness (public). Milestone state: M0 to M3 built; acceptance
-  results are in docs/VALIDATION.md. Next is M4 (aircraft funnel and scoring).
+- Repo: https://github.com/cajdata/earwitness (public). Milestone state: M0 to M4 built; acceptance
+  results are in docs/VALIDATION.md. Next is M5 (desktop UI).
 - Data cache: `data/cache` (gitignored) or `EARWITNESS_CACHE`; GLM hours are a few MB each as
-  Parquet. `scripts/m2_acceptance.py` rebuilds the M2 validation from real GLM data.
+  Parquet. `scripts/m2_acceptance.py` rebuilds the M2 validation from real GLM data and
+  `scripts/m4_acceptance.py` the M4 validation from a cached adsb.lol day (about ten minutes
+  for single-event mode, an hour or more for two-event mode).
