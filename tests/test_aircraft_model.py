@@ -84,3 +84,30 @@ def test_track_continues_straight_beyond_its_span():
     np.testing.assert_allclose(tr.position(-30.0), tr.position(0.0) - 30.0 * v_start, atol=1e-6)
     # inside the span nothing changed
     np.testing.assert_allclose(tr.position(31.0), enu[31], atol=1e-9)
+
+
+def _two_pass_track():
+    """A 40 m/s pass 671 m from the origin closest at 300 s, then a 90 m/s pass back across
+    it, 335 m off (150 m beside its line, 300 m up), closest at about 733 s."""
+    ta = np.arange(0.0, 600.0, 1.0)
+    a = np.column_stack([40.0 * (ta - 300.0), np.full(ta.size, 600.0), np.full(ta.size, 300.0)])
+    start = a[-1] + np.array([40.0, 0.0, 0.0])
+    direction = np.array([-12000.0, -300.0, 300.0]) - start
+    direction /= np.linalg.norm(direction)
+    tb = np.arange(600.0, 860.0, 1.0)
+    b = start[None, :] + 90.0 * (tb - 600.0)[:, None] * direction[None, :]
+    return am.Track(np.r_[ta, tb], np.vstack([a, b]))
+
+
+def test_closest_approach_within_a_heard_window_picks_the_pass_heard():
+    tr = _two_pass_track()
+    t_cpa, slant = am.closest_approach(tr)
+    assert 700.0 < t_cpa < 760.0  # the nearer, later pass
+    assert abs(slant - 335.4) < 1.0
+    # sound from the first pass's closest approach arrives at 300 + 670.8 / 343 = 301.96 s
+    t_cpa, slant = am.closest_approach(tr, heard_window=(290.0, 320.0))
+    assert abs(t_cpa - 300.0) < 1e-3
+    assert abs(slant - float(np.hypot(600.0, 300.0))) < 1e-3
+    # a window no sample's sound reaches falls back to the whole track
+    t_cpa, _ = am.closest_approach(tr, heard_window=(5000.0, 5100.0))
+    assert t_cpa > 700.0

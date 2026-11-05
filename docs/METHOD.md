@@ -154,7 +154,8 @@ Implementation notes that differ from or sharpen the handoff:
   computes a finer transform when the band is narrow.
 - Doppler fit tool: auto-trace follows the line outward from the brightest frame in the box,
   accepting a frame when it is at least 6 dB bright, 2 dB above the box's typical 2 s
-  brightness, and within 4% in frequency of the last accepted frame, and stopping once the
+  brightness (since M6 the view's 25th-percentile frame, see below), and within 4% in
+  frequency of the last accepted frame, and stopping once the
   line has been missing for 1.5 s. Taking every bright frame in the box instead let noise
   outnumber the line and dragged the fit to 22 m/s on the walk-through case. The fit is the
   straight flyover of `core.physics.straight_line_doppler` by bounded least squares with a
@@ -187,3 +188,56 @@ Implementation notes that differ from or sharpen the handoff:
   the coarse heat map's colour scale follows the coarse scores, so a thunder map looks
   uniformly warm and the numbered markers carry the answer; the UI requires a region, by the
   settled open decision, while the CLI can search the whole world.
+
+## M6 implementation notes (real recordings)
+
+- Heard crossing: an event's `t0_s` is the recording time at which the received frequency
+  crosses f0, when the sound emitted at closest approach arrives. The straight-line fit's own
+  t0 is the closest approach, d / c earlier; its exported ranges and speed profile carry the
+  heard crossing (`DopplerFit.heard_t0_s`, `heard_valley`), the UI's sliders show the closest
+  approach and add d / 343 m/s when saving, and Load subtracts it again. On the reference
+  recording's 6 km flyover the difference was 18 s, enough to put the modeled curve 18 Hz off
+  the ridge.
+- Speed profile (`aircraft/fit.py`, `profile_speed`): the fit holds the speed at 28 values from
+  15 to 300 m/s and refits f0, d and t0 at each; every row within 0.5 Hz rms of the best fit is
+  part of the event's `valley`. A trace without the curve's wings fixes v^2 / d and little else
+  (the reference's faint flyover fitted 60 to 230 m/s equally well while the Jacobian sigma said
+  plus or minus 2.7 m/s), so the ranges span the whole profile and `FlyoverEvent.at_speed`
+  narrows distance, fundamental and heard crossing to a flight's own speed: the funnel lays and
+  checks tubes with it and requires both events to imply one recording start, and the scorer
+  narrows f0 and t0 with the speed on the pass heard during the event (the closest approach
+  among track times whose sound arrives inside the event's window, so pattern traffic that
+  passes a point twice is narrowed with the right pass).
+- Pair prefilter: each indexed sample implies a recording start for each event, were the
+  closest approach at that sample: its time plus the event's distance at the sample's speed
+  over c, minus the event's heard crossing at that speed (`funnel.sample_starts`). The two
+  events' samples are matched in (x, y, implied start) with a time slack of the events'
+  narrowed widths, the timing tolerance and one index step, about 20 to 45 s, where the M4
+  prefilter matched raw times shifted by the gap with a slack that had to cover a sample
+  anywhere within the reach of closest approach, the reach over the slowest speed (about 1000 s
+  with honest speed ranges). The old mode stays as `FunnelConfig(prefilter="gap")`.
+- Narrow tube and exact check (`funnel.pair_cells`): per hint only the event with the narrower
+  distance band at its flight's speed is laid on the lattice, and its cells are checked against
+  the other flight's exact closest approach, so the wide tube of a distant fast aircraft is
+  never laid; the nearest track sample comes from a k-d tree, hints run in spatial order, the
+  1 s track cache is bounded, and the prefilter queries run in chunks with array reduction.
+- Clock: a known start bounds every flyover the clip can hold, so the pipeline admits only
+  flights airborne within the clip, give or take the clock tolerance and two minutes
+  (`pipeline.flight_window`), before the funnel; with two events it also keeps only candidates
+  whose implied start sits within the clock tolerance, the timing tolerance and event 1's width.
+- Auto-trace (`audio.spectrogram.trace_line`, used by the UI's ridge route and
+  `scripts/m6_measure.py`): the noise level a frame's 2 s average must clear by 2 dB is the
+  25th-percentile frame of the view. It was the median of the view's bright frames and every dim
+  frame of the whole recording, which made the same view trace differently in a clip and in the
+  full file, and a loud line filling most of the view raised it to the line itself, so a 60 s
+  view of the reference's loud flyover kept 13 of its 310 trace points.
+- Scorer window: each event is scored over a fixed 60 s either side of its heard crossing.
+  Scoring only the traced span (`ScoreConfig.trace_window`) is an option, off by default after
+  the evaluation in docs/VALIDATION.md (M6): it lifted a faint event's own score but lost the
+  reference case, because the scorer integrates along the predicted curve and picks up line too
+  faint to trace, and a trace can stop short of the heard crossing.
+- Scoring speed: brightness lookups use a frame-major copy of the whitened spectrogram (the f0
+  options at one frame sit side by side in memory), about 18% faster with identical scores, and
+  `AircraftPipelineConfig.workers` (`--workers`) scores candidates in a process pool, a chunk of
+  rows per task with only the flights it needs, identical to the serial scores. Sweeping all
+  start-time options at once in numpy was three times slower: the arrays leave the cache.

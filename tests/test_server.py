@@ -420,7 +420,7 @@ def test_server_thread_serves_the_api_on_localhost():
 
 
 def test_follow_ridge_keeps_one_continuous_line():
-    from earwitness.server.app import follow_ridge
+    from earwitness.audio.spectrogram import follow_ridge
 
     rng = np.random.default_rng(4)
     t = np.arange(400) * 0.128

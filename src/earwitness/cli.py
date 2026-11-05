@@ -373,6 +373,9 @@ def _build_analyze_aircraft(p: argparse.ArgumentParser) -> None:
         "--max-pairs", type=int, default=100000, help="flight-pair hints the prefilter keeps"
     )
     tune.add_argument("--harmonics", type=int, default=1, help="harmonics to score (default 1)")
+    tune.add_argument(
+        "--workers", type=int, default=1, help="processes that score candidates (0: one per CPU)"
+    )
     out = p.add_argument_group("output")
     out.add_argument("--out", type=Path, default=None, help="run folder (default runs/<stamp>)")
     out.add_argument("--quiet", action="store_true", help="no progress output")
@@ -449,6 +452,7 @@ def _analyze_aircraft(args: argparse.Namespace) -> int:
         top_pairs=args.top,
         max_candidates=args.max_candidates,
         use_terrain=not args.no_terrain,
+        workers=args.workers,
     )
     out_dir = args.out or Path("runs") / f"{utc_now():%Y%m%dT%H%M%SZ}-{recording.stem}-aircraft"
     priors = AircraftPriors(start=start, end=end, region=region)

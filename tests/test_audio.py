@@ -86,3 +86,42 @@ def test_whitening_removes_a_stationary_tone_but_keeps_a_sweep():
     tt, f_peak = sg.ridge(spec, 100.0, 180.0)
     mid = (tt > 2.0) & (tt < 38.0)
     assert np.max(np.abs(f_peak[mid] - (110.0 + 1.5 * tt[mid]))) < 0.6
+
+
+def _line_spectrogram(pad_s: float, seed: int = 3) -> tuple[sg.Spectrogram, float]:
+    """Whitened noise with a loud falling line, 20 dB, from 10 s to 50 s of a 60 s view that
+    starts `pad_s` into the recording; the recording continues `pad_s` past the view."""
+    rng = np.random.default_rng(seed)
+    dt = 0.128
+    t = np.arange(0.0, 60.0 + 2.0 * pad_s, dt)
+    f = np.arange(0.0, 200.0, 1.0)
+    db = rng.normal(0.0, 1.5, size=(f.size, t.size))
+    on = (t >= pad_s + 10.0) & (t <= pad_s + 50.0)
+    line_f = 140.0 - 0.8 * (t[on] - pad_s - 10.0)  # 140 Hz falling to 108 Hz
+    db[np.rint(line_f).astype(int), np.flatnonzero(on)] += 20.0
+    return sg.Spectrogram(t=t, f=f, power=np.ones_like(db), whitened_db=db), pad_s
+
+
+def test_trace_line_keeps_a_loud_line_that_fills_most_of_the_view():
+    spec, pad = _line_spectrogram(0.0)
+    t, f, db = sg.trace_line(spec, 100.0, 150.0, pad, pad + 60.0)
+    # the line holds 40 s of the 60 s view at 0.128 s frames: 313 frames, nearly all traced
+    assert t.size >= 300
+    assert t.min() <= pad + 10.5
+    assert t.max() >= pad + 49.5
+    off = np.abs(f - (140.0 - 0.8 * (t - pad - 10.0)))
+    assert np.mean(off <= 1.0) >= 0.98  # an edge frame or two may come from the noise
+    assert np.mean(db >= 15.0) >= 0.98
+
+
+def test_trace_line_does_not_depend_on_the_recording_outside_the_view():
+    # the same view alone and inside a recording nine times longer, with the same noise in view
+    short, _ = _line_spectrogram(0.0)
+    long, pad = _line_spectrogram(2110 * 0.128)  # a whole number of frames
+    in_view = (long.t >= pad) & (long.t <= pad + 60.0)
+    long.whitened_db[:, in_view] = short.whitened_db[:, : int(in_view.sum())]
+    a = sg.trace_line(short, 100.0, 150.0, 0.0, 60.0)
+    b = sg.trace_line(long, 100.0, 150.0, pad, pad + 60.0)
+    assert a[0].size == b[0].size
+    np.testing.assert_allclose(a[0], b[0] - pad, atol=1e-9)
+    np.testing.assert_allclose(a[1], b[1], atol=1e-9)

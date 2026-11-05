@@ -23,8 +23,9 @@ The full spec is docs/HANDOFF.md. Read it before changing anything in src/.
 - Open decisions (HANDOFF "Open decisions for Chris") are settled as the recommendation column,
   confirmed on 2026-11-03: Apache-2.0, CI on Windows plus Linux, local web UI, no global search
   in the UI, no Blitzortung adapter, no helicopters in v0.1.
-- Repo: https://github.com/cajdata/earwitness (public). Milestone state: M0 to M5 built, M6
-  (real-world validation) in progress; acceptance results are in docs/VALIDATION.md.
+- Repo: https://github.com/cajdata/earwitness (public). Milestone state: M0 to M5 built; M6
+  (real-world validation) met its criterion on 2026-11-05 (two aircraft cases located, two
+  thunder cases documented as failures); acceptance results are in docs/VALIDATION.md.
 - UI: `ui/` is a Vite plus TypeScript front end (MapLibre GL JS, Plotly.js) with no framework.
   `cd ui && npm install && npm run build` writes it into `src/earwitness/server/static/`
   (gitignored, shipped in the wheel through hatch `artifacts`); CI and the release build it
@@ -47,9 +48,12 @@ The full spec is docs/HANDOFF.md. Read it before changing anything in src/.
   large-region run, benchmark hints and candidates per hint on the flight set first, and run
   it in the background with its own log; its `run.log` reports prefilter and funnel progress.
   A known recording time (`--known-time`, `--known-time-tolerance`) constrains a two-event
-  search as well as driving the single-event mode: use every clue the recording gives.
+  search as well as driving the single-event mode, and limits the flights to the clip's window
+  first: use every clue the recording gives. `--workers N` scores candidates in N processes.
 - Real-case tools in `scripts/`: `m6_spectrogram.py` (overview strips and zooms, the first look),
   `m6_measure.py` (trace and fit flyovers the UI's way into events.json, with the speed
   profile and heard times), `m6_event_overlay.py` (trace and fits over the spectrogram),
   `m6_truth_check.py` (when a case fails: which flights passed the true site and how it scores
-  by hand with them; every M6 bug was a measurement or convention problem it exposed).
+  by hand with them; every M6 bug was a measurement or convention problem it exposed),
+  `m6_clip_sweep.py` (cut excerpts around the flyovers and run known-time searches on them:
+  how short a clip can be, with the analyst's trace cut to each excerpt or re-traced).

@@ -132,11 +132,28 @@ def straight_track(
     return Track(t, enu, icao=icao, type_code=type_code)
 
 
-def closest_approach(track: Track, observer: ArrayLike = (0.0, 0.0, 0.0)) -> tuple[float, float]:
-    """Time and slant distance of closest approach within the track's span."""
+def closest_approach(
+    track: Track,
+    observer: ArrayLike = (0.0, 0.0, 0.0),
+    heard_window: tuple[float, float] | None = None,
+    c: float = SPEED_OF_SOUND,
+) -> tuple[float, float]:
+    """Time and slant distance of closest approach within the track's span.
+
+    With `heard_window` (reception times, the track's time base), only samples whose sound
+    arrives inside the window are searched, so a track that passes the observer more than once
+    answers with the pass heard then rather than the nearest one; when no sample's sound
+    arrives inside it, the whole span is searched.
+    """
     o = np.asarray(observer, dtype=float)
     dist = np.linalg.norm(track.enu - o, axis=1)
-    i = int(np.argmin(dist))
+    pick = dist
+    if heard_window is not None:
+        heard = track.t + dist / c
+        inside = (heard >= heard_window[0]) & (heard <= heard_window[1])
+        if inside.any():
+            pick = np.where(inside, dist, np.inf)
+    i = int(np.argmin(pick))
     lo = float(track.t[max(i - 1, 0)])
     hi = float(track.t[min(i + 1, track.t.size - 1)])
     if hi <= lo:

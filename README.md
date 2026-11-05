@@ -15,7 +15,11 @@ Full specification: [docs/HANDOFF.md](docs/HANDOFF.md).
 
 Pre-alpha. Both methods run end to end on real data (GOES GLM lightning, adsb.lol flights)
 and pass their synthetic acceptance checks, and the desktop UI takes a recording from a file
-to a heat map for both; no real recording has been validated yet (that is M6).
+to a heat map for both. On real recordings (M6) the aircraft method located two of two to
+within about 200 m inside a metropolitan-sized search region, one of them a phone video, which
+two flyovers and the phone's own clock also located from a 150 s excerpt; the thunder method
+located neither of two public field recordings made in dense storms. See
+[docs/VALIDATION.md](docs/VALIDATION.md).
 
 | Milestone | Scope | State |
 | --- | --- | --- |
@@ -25,7 +29,7 @@ to a heat map for both; no real recording has been validated yet (that is M6).
 | M3 | ADS-B data: adsb.lol loader, aircraft types, terrain | done |
 | M4 | Aircraft Doppler pipeline: events, funnel, scoring, outputs | done, see [docs/VALIDATION.md](docs/VALIDATION.md) |
 | M5 | Desktop UI: local API, Vite front end, native window, audit mode | done, see [docs/VALIDATION.md](docs/VALIDATION.md) |
-| M6 | Real-world validation | in progress, see [docs/VALIDATION.md](docs/VALIDATION.md) |
+| M6 | Real-world validation | done: aircraft cases located, thunder failures documented, see [docs/VALIDATION.md](docs/VALIDATION.md) |
 | M7 | v0.1.0 release and site | planned |
 
 ## Responsible use

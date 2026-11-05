@@ -178,3 +178,63 @@ def test_two_event_pipeline_honours_a_known_time(tmp_path):
     assert summary["top"][0]["rank"] == 1
     assert distance_to(summary, LAT, LON)[0] < 200.0
     assert "known time with two events" in (run / "run.log").read_text(encoding="utf-8")
+
+
+def test_a_known_time_limits_the_flights_to_the_clip_window(tmp_path):
+    from earwitness.aircraft.pipeline import KNOWN_TIME_PAD_S, flight_window
+
+    case, truth, flights = _case(tmp_path)
+    events = events_from_truth(truth)
+    priors = AircraftPriors(
+        START - timedelta(hours=2), START + timedelta(hours=2), BBox.around(LAT, LON, 15000.0)
+    )
+    lo, hi = flight_window(priors, events, 900.0)
+    assert (lo, hi) == (priors.start.timestamp() - 900.0, priors.end.timestamp() + 900.0)
+    events.known_time = START
+    events.known_time_tolerance_s = 2.0
+    lo, hi = flight_window(priors, events, 900.0)
+    assert lo == START.timestamp() - 2.0 - KNOWN_TIME_PAD_S
+    assert hi == START.timestamp() + 900.0 + 2.0 + KNOWN_TIME_PAD_S
+    # the decoys fly half an hour before and after the clip: only the two event flights remain,
+    # and the answer is the same one the unrestricted search gives
+    cfg = AircraftPipelineConfig(use_terrain=False, top_pairs=5, heatmap_pairs=1)
+    run = tmp_path / "run"
+    summary = analyze_aircraft(case / "recording.wav", events, flights, priors, run, cfg)
+    assert "2 of 4 flights admitted within the known clip window" in (run / "run.log").read_text(
+        encoding="utf-8"
+    )
+    assert distance_to(summary, LAT, LON)[0] < 200.0
+    # a clock outside the date prior admits nothing and still writes a well-typed run
+    events.known_time = START + timedelta(days=3)
+    summary = analyze_aircraft(case / "recording.wav", events, flights, priors, run, cfg)
+    assert summary["top"] == []
+    assert summary["counts"]["flights"] == 0
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    schema = pq.read_schema(run / "results.parquet")
+    assert schema.field("t_start_unix").type == pa.float64()
+
+
+def test_parallel_scoring_gives_the_serial_answer(tmp_path):
+    case, truth, flights = _case(tmp_path)
+    events = events_from_truth(truth)
+    priors = AircraftPriors(
+        START - timedelta(minutes=10), START + timedelta(minutes=10), BBox.around(LAT, LON, 15000.0)
+    )
+    serial = AircraftPipelineConfig(use_terrain=False, top_pairs=3, heatmap_pairs=1)
+    parallel = AircraftPipelineConfig(
+        use_terrain=False, top_pairs=3, heatmap_pairs=1, workers=2, parallel_min_rows=1,
+        parallel_chunk_rows=7,
+    )  # fmt: skip
+    a = analyze_aircraft(case / "recording.wav", events, flights, priors, tmp_path / "a", serial)
+    b = analyze_aircraft(case / "recording.wav", events, flights, priors, tmp_path / "b", parallel)
+    assert [(t["lat"], t["lon"], t["score"]) for t in a["top"]] == [
+        (t["lat"], t["lon"], t["score"]) for t in b["top"]
+    ]
+    import pyarrow.parquet as pq
+
+    sa = pq.read_table(tmp_path / "a" / "results.parquet").column("score").to_pylist()
+    sb = pq.read_table(tmp_path / "b" / "results.parquet").column("score").to_pylist()
+    assert sa == sb
+    assert "on 2 processes" in (tmp_path / "b" / "run.log").read_text(encoding="utf-8")

@@ -72,8 +72,9 @@ class RidgeRequest(BaseModel):
     max_gap_s: float = 1.5
     """How long the line may drop out before following stops."""
     min_margin_db: float = 2.0
-    """When following, a frame must also be this far above the typical frame of the box in a
-    2 s average; isolated noise peaks are bright for one frame, a line stays bright."""
+    """When following, a frame must also be this far above the view's noise level (its 25th
+    percentile frame) in a 2 s average; isolated noise peaks are bright for one frame, a line
+    stays bright."""
 
 
 class PreviewRequest(BaseModel):
@@ -114,39 +115,6 @@ def json_safe(value: object) -> object:
 def json_file(path: Path) -> JSONResponse:
     """A run file as a browser-safe JSON response."""
     return JSONResponse(json_safe(json.loads(path.read_text(encoding="utf-8"))))
-
-
-def follow_ridge(
-    t: np.ndarray,
-    f: np.ndarray,
-    bright: np.ndarray,
-    allowed: np.ndarray,
-    max_step: float,
-    max_gap_s: float,
-) -> np.ndarray:
-    """Frames that belong to the one line through the brightest allowed frame.
-
-    Starting at the brightest allowed frame, walk outward in both directions, accepting a frame
-    when it is allowed and its frequency is within `max_step` (a fraction) of the last accepted
-    one, and stopping once the line has been missing for more than `max_gap_s`.
-    """
-    out = np.zeros(t.size, dtype=bool)
-    candidates = np.flatnonzero(allowed)
-    seed = int(candidates[np.argmax(bright[candidates])])
-    out[seed] = True
-    for direction in (1, -1):
-        last_f = float(f[seed])
-        last_t = float(t[seed])
-        i = seed + direction
-        while 0 <= i < t.size:
-            if abs(float(t[i]) - last_t) > max_gap_s:
-                break
-            if allowed[i] and abs(float(f[i]) - last_f) <= max_step * last_f:
-                out[i] = True
-                last_f = float(f[i])
-                last_t = float(t[i])
-            i += direction
-    return out
 
 
 def require_local_token(request: Request) -> None:
@@ -253,33 +221,18 @@ def create_app(ws: Workspace) -> FastAPI:
 
     @api.post("/recordings/{rid}/ridge")
     def recording_ridge(rid: str, req: RidgeRequest, ws: Ws) -> dict[str, object]:
-        from earwitness.audio.spectrogram import ridge
+        from earwitness.audio.spectrogram import trace_line
 
         rec = recording(ws, rid)
         fmax = max(req.f_hi * 1.05, 50.0)
         spec = rec.spectrogram(nfft=req.nfft, hop=req.hop, fmax=fmax)  # type: ignore[attr-defined]
         try:
-            t, f = ridge(spec, req.f_lo, req.f_hi, whitened=req.whitened)
+            t, f, bright = trace_line(
+                spec, req.f_lo, req.f_hi, req.t_lo, req.t_hi, req.min_db, req.whitened,
+                req.follow, req.max_step, req.max_gap_s, req.min_margin_db,
+            )  # fmt: skip
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
-        rows = (spec.f >= req.f_lo) & (spec.f <= req.f_hi)
-        view = spec.whitened_db if req.whitened else 10.0 * np.log10(spec.power + 1e-30)
-        bright = view[rows].max(axis=0)
-        keep = bright >= req.min_db
-        if req.t_lo is not None:
-            keep &= t >= req.t_lo
-        if req.t_hi is not None:
-            keep &= t <= req.t_hi
-        if req.follow and keep.any():
-            dt = float(t[1] - t[0]) if t.size > 1 else 1.0
-            width = max(1, round(2.0 / dt))
-            smooth = np.convolve(bright, np.ones(width) / width, mode="same")
-            window = keep if req.t_lo is None and req.t_hi is None else keep | (bright < req.min_db)
-            typical = float(np.median(smooth[window])) if window.any() else 0.0
-            keep &= smooth >= typical + req.min_margin_db
-            if keep.any():
-                keep = follow_ridge(t, f, bright, keep, req.max_step, req.max_gap_s)
-        t, f, bright = t[keep], f[keep], bright[keep]
         return {
             "t": np.round(t, 3).tolist(),
             "f": np.round(f, 3).tolist(),

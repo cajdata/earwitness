@@ -60,6 +60,11 @@ class FunnelConfig:
     """Lower bound on speed used when converting distances to time slack."""
     max_pairs: int = 100000
     """Most pair hints the prefilter returns; the run log says when the cap truncated it."""
+    prefilter: str = "start"
+    """'start' pairs samples by the recording start each one implies at its own speed, a time
+    slack of the events' narrowed widths; 'gap' pairs them by the heard-time gap with the slack
+    a sample's distance from closest approach allows (the M4 prefilter: a superset of the
+    hints the funnel can use, at tens of times the sample pairs with honest speed ranges)."""
 
 
 class Lattice:
@@ -406,15 +411,40 @@ class PairHints:
         return PairHints(np.zeros(0, np.int64), np.zeros(0, np.int64), np.zeros((0, 2)))
 
 
+def sample_starts(
+    fs: FlightSet, idx: IntArray, event: FlyoverEvent, cfg: FunnelConfig
+) -> tuple[FloatArray, float]:
+    """Recording start each indexed sample implies for an event, and the largest uncertainty.
+
+    Were the closest approach to the site at the sample, the event was heard at the sample's
+    time plus the slant distance over c, and the recording began the event's heard t0 before
+    that; distance and t0 are the event's own at the sample's speed (`FlyoverEvent.at_speed`),
+    so a profiled event lends each sample the narrow band its speed allows. The uncertainty per
+    sample is half the distance band over c plus half the t0 band; the largest is returned.
+    """
+    band = event.at_speed(fs.sample_speed[idx])
+    d_lo, d_hi = band["d_m"][0], np.minimum(band["d_m"][1], cfg.max_distance_m)
+    t_lo, t_hi = band["t0_s"]
+    c = cfg.speed_of_sound
+    start = fs.sample_t[idx] + 0.5 * (d_lo + d_hi) / c - 0.5 * (t_lo + t_hi)
+    half = 0.5 * np.maximum(d_hi - d_lo, 0.0) / c + 0.5 * (t_hi - t_lo)
+    return start, float(half.max()) if half.size else 0.0
+
+
 def pair_prefilter(
     fs: FlightSet, e1: FlyoverEvent, e2: FlyoverEvent, gap: Range, cfg: FunnelConfig
 ) -> PairHints:
     """Flight pairs that could produce two flyovers `gap` apart, and where they meet.
 
-    Event-1 samples are indexed in (x, y, scaled time) with time shifted by the gap, so a ball
-    query around each event-2 sample finds samples that are close in space and whose times
-    differ by the gap within the allowed slack. One hint is kept per flight pair per meeting
-    place (coarse cells twice the reach wide): two aircraft working the same airport meet again
+    In 'start' mode (the default) each event's samples are indexed in (x, y, scaled implied
+    recording start, `sample_starts`), so a ball query around each event-2 sample finds event-1
+    samples close in space whose implied starts agree within the events' widths, the timing
+    tolerance and one index step (each sample lies within half a step of its flight's closest
+    approach); the reach grows by the half step either flight can fly. In 'gap' mode event-1
+    samples are indexed by time shifted by the gap, with a slack that must cover a sample
+    anywhere within the reach of closest approach, reach over the slowest speed. One hint is
+    kept per flight pair per meeting place (coarse cells twice the reach wide): two aircraft
+    working the same airport meet again
     and again, and every meeting place has to be searched, not just the first one found. The
     queries run in chunks and the hits are reduced with array operations, since a continental
     day returns hundreds of millions of sample pairs. The list stops at `cfg.max_pairs` hints,
@@ -425,14 +455,26 @@ def pair_prefilter(
     if not m1.any() or not m2.any():
         return PairHints.empty()
     reach = pair_reach(e1, e2, cfg)
-    v_min = max(min(e1.v_mps.lo, e2.v_mps.lo), cfg.min_speed_mps)
-    slack = cfg.timing_tolerance_s + gap.half_width + reach / v_min + cfg.index_step_s
-    scale = reach / slack
     coarse = 2.0 * reach
     i1 = np.flatnonzero(m1)
     i2 = np.flatnonzero(m2)
-    pts1 = np.column_stack([fs.sample_xy[i1], (fs.sample_t[i1] + gap.mid) * scale])
-    pts2 = np.column_stack([fs.sample_xy[i2], fs.sample_t[i2] * scale])
+    if cfg.prefilter == "gap":
+        v_min = max(min(e1.v_mps.lo, e2.v_mps.lo), cfg.min_speed_mps)
+        slack = cfg.timing_tolerance_s + gap.half_width + reach / v_min + cfg.index_step_s
+        scale = reach / slack
+        t1 = fs.sample_t[i1] + gap.mid
+        t2 = fs.sample_t[i2]
+    elif cfg.prefilter == "start":
+        t1, h1 = sample_starts(fs, i1, e1, cfg)
+        t2, h2 = sample_starts(fs, i2, e2, cfg)
+        v_top = float(fs.sample_speed[i1].max()) + float(fs.sample_speed[i2].max())
+        reach += 0.5 * cfg.index_step_s * v_top
+        slack = cfg.timing_tolerance_s + cfg.index_step_s + h1 + h2
+        scale = reach / slack
+    else:
+        raise ValueError(f"unknown prefilter mode {cfg.prefilter!r}")
+    pts1 = np.column_stack([fs.sample_xy[i1], t1 * scale])
+    pts2 = np.column_stack([fs.sample_xy[i2], t2 * scale])
     tree = cKDTree(pts1)
     keys: list[IntArray] = []
     mids: list[FloatArray] = []

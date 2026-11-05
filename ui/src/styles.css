@@ -342,6 +342,10 @@ input[type="range"] {
   min-height: 460px;
 }
 
+.plot.short {
+  min-height: 220px;
+}
+
 .log {
   font-family: var(--mono);
   font-size: 12px;

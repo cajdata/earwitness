@@ -188,7 +188,7 @@ def main() -> None:
     )
     offs = np.arange(-40.0, 40.5, 1.0)
     for ev, tr in zip(events.events, tracks, strict=True):
-        n = at_track_speed(ev, tr, xyz)
+        n = at_track_speed(ev, tr, xyz, start, 40.0)
         wide = FlyoverEvent(
             ev.id,
             n.t0_s,

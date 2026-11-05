@@ -13,6 +13,13 @@ sweeps a small time correction and f0; that fixes the recording start, so event 
 only. In single-event known-time mode the time sweep is the known-time
 tolerance; a traced curve, when given, is reported as the RMS distance of the modeled curve
 from it, a diagnostic that does not enter the score.
+
+Each event is scored over a fixed window either side of its heard closest approach. Scoring
+only the span its trace covers (`trace_window`, off by default) lifts a faint event's own score,
+since a line traced for 20 s of a two-minute window is no longer averaged with the rest, but on
+the M6 recordings it cost more than it gave: the scorer integrates along the predicted curve and
+picks up line too faint to trace, a trace can stop short of the heard crossing itself, and the
+untraced wings are what tell look-alike aircraft apart (docs/VALIDATION.md, M6).
 """
 
 from __future__ import annotations
@@ -35,7 +42,12 @@ class ScoreConfig:
     """Scoring parameters."""
 
     window_s: float = 60.0
-    """Frames within this many seconds of the measured closest approach are scored."""
+    """Frames within this many seconds of the measured closest approach are scored, for an
+    event without a trace (see `trace_window`)."""
+    trace_window: bool = False
+    """Score a traced event over its trace's span widened by `trace_margin_s` instead; off by
+    default, see the module notes."""
+    trace_margin_s: float = 10.0
     time_sweep_s: float = 3.0
     time_step_s: float = 0.5
     f0_sweep_hz: float = 3.0
@@ -58,6 +70,9 @@ class SpectrogramIndex:
         self.db = spec.whitened_db
         self.dt = float(spec.t[1] - spec.t[0]) if spec.t.size > 1 else 1.0
         self.df = float(spec.f[1] - spec.f[0]) if spec.f.size > 1 else 1.0
+        # frame-major copy for the lookups: a curve's f0 options at one frame then sit side by
+        # side in memory instead of a whole row of frames apart
+        self._flat = np.ascontiguousarray(spec.whitened_db.T).ravel()
 
     @property
     def duration(self) -> float:
@@ -76,17 +91,30 @@ class SpectrogramIndex:
         """
         t_s = np.asarray(t_s, dtype=float)
         f_hz = np.asarray(f_hz, dtype=float)
-        col = np.clip(np.rint((t_s - self.t[0]) / self.dt).astype(int), 0, self.t.size - 1)
+        nf = self.f.size
+        col = np.clip(np.rint((t_s - self.t[0]) / self.dt).astype(np.int64), 0, self.t.size - 1)
         pos = (f_hz - self.f[0]) / self.df
-        finite = np.isfinite(pos)
-        valid = finite & (pos >= 0.0) & (pos <= self.f.size - 1)
-        pos_c = np.where(finite, np.clip(pos, 0.0, self.f.size - 1 - 1e-9), 0.0)
-        lo = np.floor(pos_c).astype(int)
+        valid = (pos >= 0.0) & (pos <= nf - 1)  # false for NaN
+        pos_c = np.clip(np.where(valid, pos, 0.0), 0.0, nf - 1 - 1e-9)
+        lo = pos_c.astype(np.int64)
         frac = pos_c - lo
-        hi = np.minimum(lo + 1, self.f.size - 1)
-        col_b = np.broadcast_to(col, pos.shape)
-        values = self.db[lo, col_b] * (1.0 - frac) + self.db[hi, col_b] * frac
+        base = np.broadcast_to(col * nf, pos.shape)
+        i_lo = base + lo
+        i_hi = np.minimum(i_lo + 1, base + nf - 1)
+        values = self._flat.take(i_lo) * (1.0 - frac) + self._flat.take(i_hi) * frac
         return np.where(valid, values, np.nan)
+
+
+def event_window(event: FlyoverEvent, cfg: ScoreConfig) -> tuple[float, float]:
+    """Recording-time span scored for an event: its trace's span widened by the margin when it
+    has a trace of five points or more (and `cfg.trace_window`), else `cfg.window_s` either
+    side of its heard closest approach."""
+    if cfg.trace_window and event.trace is not None and event.trace.shape[0] >= 5:
+        t = event.trace[:, 0]
+        t = t[np.isfinite(t)]
+        if t.size >= 5:
+            return float(t.min()) - cfg.trace_margin_s, float(t.max()) + cfg.trace_margin_s
+    return event.t0_s.mid - cfg.window_s, event.t0_s.mid + cfg.window_s
 
 
 def curve_geometry(
@@ -172,7 +200,7 @@ def _sweep(
     cfg: ScoreConfig,
 ) -> tuple[FloatArray, FloatArray, FloatArray]:
     """Mean brightness for every (recording start option, f0 option). Returns (scores, dts, f0s)."""
-    t_rec = index.frames_between(event.t0_s.mid - cfg.window_s, event.t0_s.mid + cfg.window_s)
+    t_rec = index.frames_between(*event_window(event, cfg))
     f0_half = max(cfg.f0_sweep_hz, event.f0_hz.half_width)
     f0s = np.arange(event.f0_hz.mid - f0_half, event.f0_hz.mid + f0_half + 1e-9, cfg.f0_step_hz)
     if t_rec.size == 0:
@@ -216,9 +244,7 @@ def score_event(
     if np.all(np.isnan(scores)):
         return EventScore(float("-inf"), event.f0_hz.mid, 0.0, t_start_base, 0)
     i, j = np.unravel_index(np.nanargmax(scores), scores.shape)
-    n_frames = index.frames_between(
-        event.t0_s.mid - cfg.window_s, event.t0_s.mid + cfg.window_s
-    ).size
+    n_frames = index.frames_between(*event_window(event, cfg)).size
     return EventScore(float(scores[i, j]), float(f0s[j]), float(dts[i]), float(starts[i]), n_frames)
 
 
@@ -247,16 +273,34 @@ def trace_closeness(
     return -float(np.sqrt(np.mean(diff[ok] ** 2)))
 
 
-def at_track_speed(event: FlyoverEvent, track: Track, observer_xyz: FloatArray) -> FlyoverEvent:
-    """The event narrowed to the track's speed at closest approach to the observer.
+HEARD_PASS_SLACK_S = 10.0
+"""Seconds added around an event's heard-time range when looking for the pass that was heard."""
+
+
+def at_track_speed(
+    event: FlyoverEvent,
+    track: Track,
+    observer_xyz: FloatArray,
+    t_start: float | None = None,
+    slack_s: float = HEARD_PASS_SLACK_S,
+    c: float = SPEED_OF_SOUND,
+) -> FlyoverEvent:
+    """The event narrowed to the track's speed at closest approach on the pass that was heard.
 
     A profiled event ties distance, fundamental and closest-approach time to the speed; the
-    ADS-B track supplies the speed, so the sweeps stay narrow. Events without a profile are
-    returned as they are.
+    ADS-B track supplies the speed, so the sweeps stay narrow. With the recording start
+    `t_start`, the closest approach is sought among the track times whose sound arrives inside
+    the event's heard-time range, widened by `slack_s`: an aircraft working a pattern passes a
+    point several times at different speeds, and the nearest pass need not be the one heard.
+    Without it, the nearest pass of the whole track. Events without a profile are returned as
+    they are.
     """
-    if event.valley is None:
+    if not event.profiled:
         return event
-    t_cpa, _ = closest_approach(track, observer_xyz)
+    window = None
+    if t_start is not None:
+        window = (t_start + event.t0_s.lo - slack_s, t_start + event.t0_s.hi + slack_s)
+    t_cpa, _ = closest_approach(track, observer_xyz, heard_window=window, c=c)
     step = 0.5
     v = float(np.linalg.norm(track.position(t_cpa + step) - track.position(t_cpa - step))) / (
         2.0 * step
@@ -305,14 +349,21 @@ def score_candidate(
     time_sweep_s: float | None = None,
     known_time_tolerance_s: float | None = None,
 ) -> CandidateScore:
-    """Locked multi-event score: event 1 sweeps time and f0, later events sweep f0 only."""
-    e1 = at_track_speed(events.events[0], tracks[0], observer_xyz)
+    """Locked multi-event score: event 1 sweeps time and f0, later events sweep f0 only.
+
+    Profiled events are narrowed to each flight's speed on the pass heard during the event,
+    found around the candidate's start (`at_track_speed`); in known-time mode the clock
+    tolerance widens that search for event 1.
+    """
+    c = cfg.speed_of_sound
+    slack = HEARD_PASS_SLACK_S + (known_time_tolerance_s or 0.0)
+    e1 = at_track_speed(events.events[0], tracks[0], observer_xyz, t_start_base, slack, c)
     sweep = time_sweep_for(e1, cfg, time_sweep_s, known_time_tolerance_s)
     first = score_event(index, tracks[0], observer_xyz, e1, t_start_base, cfg, sweep)
     results = [first]
     t_start = first.t_start
     for event, track in zip(events.events[1:], tracks[1:], strict=True):
-        narrowed = at_track_speed(event, track, observer_xyz)
+        narrowed = at_track_speed(event, track, observer_xyz, t_start, HEARD_PASS_SLACK_S, c)
         results.append(score_event(index, track, observer_xyz, narrowed, t_start, cfg, None))
     total = float(sum(r.score for r in results))
     trace_rms = float("nan")

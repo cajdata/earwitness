@@ -2,11 +2,12 @@
 
 Each --event is "id,t_lo,t_hi,f_lo,f_hi[,harmonics]": the trace window in recording seconds
 and the band of the line to follow in Hz (the fundamental, or any harmonic; the scorer only
-needs a real Doppler line of that aircraft). The trace is the UI's ridge route: the brightest
-bin per frame, an adaptive brightness margin, then following the line outward from its
-brightest frame. The fit profiles the speed and the event carries the valley with heard
-closest-approach times. A known recording time makes a single-event file; two events make a
-two-event file, which a known time also constrains.
+needs a real Doppler line of that aircraft). The trace is the UI's ridge route
+(`earwitness.audio.spectrogram.trace_line`): the brightest bin per frame, a margin over the
+view's noise level, then following the line outward from its brightest frame. The fit profiles
+the speed and the event carries the valley with heard closest-approach times. A known
+recording time makes a single-event file; two events make a two-event file, which a known time
+also constrains.
 
 Usage, from the repo root:
   uv run python scripts/m6_measure.py <audio> <events.json> --event loud,690,775,70,120,3
@@ -25,9 +26,8 @@ from numpy.typing import NDArray
 from earwitness.aircraft.fit import fit_straight_flyover
 from earwitness.audio.decode import read_audio
 from earwitness.audio.events import EventSet, FlyoverEvent, Range
-from earwitness.audio.spectrogram import Spectrogram, ridge, spectrogram
+from earwitness.audio.spectrogram import Spectrogram, spectrogram, trace_line
 from earwitness.project import parse_utc, sha256_file
-from earwitness.server.app import follow_ridge
 
 FloatArray = NDArray[np.float64]
 
@@ -44,19 +44,9 @@ def trace(
     max_gap_s: float = 1.5,
 ) -> tuple[FloatArray, FloatArray, FloatArray]:
     """Traced (time, frequency, brightness) of the line in a band and window, the UI's way."""
-    t, f = ridge(spec, f_lo, f_hi, whitened=True)
-    rows = (spec.f >= f_lo) & (spec.f <= f_hi)
-    bright = spec.whitened_db[rows].max(axis=0)
-    keep = (bright >= min_db) & (t >= t_lo) & (t <= t_hi)
-    dt = float(t[1] - t[0])
-    width = max(1, round(2.0 / dt))
-    smooth = np.convolve(bright, np.ones(width) / width, mode="same")
-    window = keep | (bright < min_db)
-    typical = float(np.median(smooth[window])) if window.any() else 0.0
-    keep &= smooth >= typical + margin_db
-    if keep.any():
-        keep = follow_ridge(t, f, bright, keep, max_step, max_gap_s)
-    return t[keep], f[keep], bright[keep]
+    return trace_line(
+        spec, f_lo, f_hi, t_lo, t_hi, min_db, True, True, max_step, max_gap_s, margin_db
+    )
 
 
 def parse_event(raw: str) -> tuple[str, float, float, float, float, int]:

@@ -2,8 +2,21 @@
 
 Per the handoff, measurements are stored as ranges, not points: the straight-line fit of a
 Doppler curve can say the plane was near 100 m/s but surely not 70, and the funnel should use
-exactly that. Times are seconds into the recording; `t0_s` is the heard closest-approach time,
-the moment the received frequency crosses `f0`.
+exactly that. Times are seconds into the recording.
+
+`t0_s` is the heard crossing: the recording time at which the received frequency crosses `f0`,
+which is when the sound emitted at closest approach arrives. It is not the closest-approach
+time of the straight-line model (`DopplerFit.t0_s`, when the aircraft was nearest), which comes
+one acoustic delay, d / c, earlier; a fit's ranges and valley are converted with
+`DopplerFit.heard_t0_s` and `heard_valley`, and the UI's manual sliders add d / 343 m/s. The
+difference is 18 s for a 6 km flyover, and an event stored with the closest-approach time
+starts the search clock that much late.
+
+`valley` is an optional speed profile from the fit (`earwitness.aircraft.fit.profile_speed`):
+rows of speed, distance, fundamental and heard crossing that all fit the trace within 0.5 Hz
+rms of the best. A trace without the curve's wings fixes only v^2 / d, so the ranges alone are
+wide; with a valley the funnel and scorer narrow distance, fundamental and heard crossing to
+each flight's own speed. The fit returns a fifth column, its rms, which readers ignore.
 
 `events.json` layout (schema `earwitness.events/1`):
 
@@ -12,7 +25,8 @@ the moment the received frequency crosses `f0`.
      "known_time_utc": null,                    # or an ISO timestamp of the recording start
      "known_time_tolerance_s": 1.0,
      "events": [{"id": "e1", "t0_s": [280, 290], "f0_hz": [100, 120], "v_mps": [60, 80],
-                 "d_m": [200, 800], "harmonics": 1, "trace": [[t_s, f_hz], ...] | null}],
+                 "d_m": [200, 800], "harmonics": 1, "trace": [[t_s, f_hz], ...] | null,
+                 "valley": [[v_mps, d_m, f0_hz, t0_s], ...] | null}],
      "silence": [{"start_s": 0, "end_s": 200}]}
 """
 
@@ -133,6 +147,11 @@ class FlyoverEvent:
             valley=rows,
         )
 
+    @property
+    def profiled(self) -> bool:
+        """True when the event carries a speed profile with at least one row."""
+        return self.valley is not None and self.valley.shape[0] > 0
+
     def at_speed(self, v: ArrayLike) -> dict[str, tuple[FloatArray, FloatArray]]:
         """(lo, hi) arrays of d_m, f0_hz and t0_s for aircraft speeds `v`.
 
@@ -146,9 +165,9 @@ class FlyoverEvent:
         def const(r: Range) -> tuple[FloatArray, FloatArray]:
             return np.full(v.shape, r.lo), np.full(v.shape, r.hi)
 
-        if self.valley is None or self.valley.shape[0] == 0:
+        if not self.profiled:
             return {"d_m": const(self.d_m), "f0_hz": const(self.f0_hz), "t0_s": const(self.t0_s)}
-        rows = self.valley[np.argsort(self.valley[:, 0])]
+        rows = self.valley[np.argsort(self.valley[:, 0])]  # type: ignore[index]
         lv = np.log(np.clip(v, 1e-3, None))
         lrows = np.log(np.clip(rows[:, 0], 1e-3, None))
         d = np.exp(np.interp(lv, lrows, np.log(np.clip(rows[:, 1], 1e-3, None))))
@@ -170,7 +189,7 @@ class FlyoverEvent:
 
     def narrowed(self, v: float) -> FlyoverEvent:
         """This event with d_m, f0_hz and t0_s narrowed to speed `v` (see `at_speed`)."""
-        if self.valley is None or self.valley.shape[0] == 0:
+        if not self.profiled:
             return self
         r = self.at_speed(v)
         return replace(

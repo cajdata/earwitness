@@ -10,7 +10,9 @@ modeled curves, summary, run log).
 from __future__ import annotations
 
 import json
+import os
 import time
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -41,12 +43,13 @@ from earwitness.aircraft.score import (
 )
 from earwitness.audio.decode import read_audio, resample
 from earwitness.audio.events import VALLEY_HALF_T0_S, EventSet
-from earwitness.audio.spectrogram import ridge, spectrogram
+from earwitness.audio.spectrogram import Spectrogram, ridge, spectrogram
 from earwitness.core import geodesy
 from earwitness.core.grid import BBox, local_grid
 from earwitness.project import RunLog, sha256_file, toml_dumps, utc_iso
 
 FloatArray = NDArray[np.float64]
+IntArray = NDArray[np.int64]
 
 
 @dataclass(frozen=True)
@@ -83,6 +86,57 @@ class AircraftPipelineConfig:
     heatmap_half_extent_m: float = 1500.0
     max_candidates: int = 30000
     use_terrain: bool = True
+    workers: int = 1
+    """Processes that score candidates; 0 means one per CPU. Scoring is independent per
+    candidate and was most of a large search's time on one core."""
+    parallel_min_rows: int = 2000
+    """Fewer candidates than this are scored in the calling process."""
+    parallel_chunk_rows: int = 1000
+    """Candidates per task sent to a worker; each task carries only the flights it needs."""
+
+
+_WORKER: dict[str, object] = {}
+"""Per-process scoring state set by `_init_scoring_worker`."""
+
+
+def _init_scoring_worker(
+    spec: Spectrogram,
+    events: EventSet,
+    score_cfg: ScoreConfig,
+    known_time_tolerance_s: float | None,
+) -> None:
+    _WORKER.update(
+        index=SpectrogramIndex(spec),
+        events=events,
+        cfg=score_cfg,
+        known=known_time_tolerance_s,
+    )
+
+
+def _score_chunk(
+    flights: dict[int, Flight], f1: IntArray, f2: IntArray, xyz: FloatArray, t_start: FloatArray
+) -> list[CandidateScore]:
+    """Score candidate rows in a worker; `flights` holds every flight the rows refer to."""
+    index: SpectrogramIndex = _WORKER["index"]  # type: ignore[assignment]
+    events: EventSet = _WORKER["events"]  # type: ignore[assignment]
+    cfg: ScoreConfig = _WORKER["cfg"]  # type: ignore[assignment]
+    tracks = {k: fl.track_ecef(1.0) for k, fl in flights.items()}
+    out: list[CandidateScore] = []
+    for i in range(xyz.shape[0]):
+        rows = [tracks[int(f1[i])]]
+        if not events.single_event:
+            rows.append(tracks[int(f2[i])])
+        out.append(
+            score_candidate(
+                index, rows, xyz[i], events, float(t_start[i]), cfg,
+                known_time_tolerance_s=_WORKER["known"],  # type: ignore[arg-type]
+            )
+        )  # fmt: skip
+    return out
+
+
+def _worker_count(cfg: AircraftPipelineConfig) -> int:
+    return (os.cpu_count() or 1) if cfg.workers <= 0 else cfg.workers
 
 
 def _score_rows(
@@ -95,8 +149,14 @@ def _score_rows(
     events: EventSet,
     cfg: AircraftPipelineConfig,
     known_time_tolerance_s: float | None,
+    spec: Spectrogram | None = None,
 ) -> list[CandidateScore]:
     xyz = geodesy.geodetic_to_ecef(lat, lon, height)
+    workers = _worker_count(cfg)
+    if workers > 1 and lat.size >= cfg.parallel_min_rows and spec is not None:
+        return _score_rows_parallel(
+            spec, fs, cand, xyz, events, cfg, known_time_tolerance_s, workers
+        )
     out: list[CandidateScore] = []
     for i in range(lat.size):
         tracks = [fs.track(int(cand.f1[i]))]
@@ -113,6 +173,47 @@ def _score_rows(
                 known_time_tolerance_s=known_time_tolerance_s,
             )
         )
+    return out
+
+
+def _score_rows_parallel(
+    spec: Spectrogram,
+    fs: FlightSet,
+    cand: Candidates,
+    xyz: FloatArray,
+    events: EventSet,
+    cfg: AircraftPipelineConfig,
+    known_time_tolerance_s: float | None,
+    workers: int,
+) -> list[CandidateScore]:
+    """`_score_rows` over a process pool: chunks of rows in order, each with its own flights.
+
+    Candidates arrive grouped by flight pair, so a chunk needs few flights; each worker builds
+    the 1 s tracks of the flights in its chunk. Scores are the serial ones exactly, in order.
+    """
+    n = xyz.shape[0]
+    step = max(1, cfg.parallel_chunk_rows)
+    tasks = []
+    for lo in range(0, n, step):
+        sl = slice(lo, min(lo + step, n))
+        f1 = cand.f1[sl].astype(np.int64)
+        f2 = cand.f2[sl].astype(np.int64)
+        used = set(f1.tolist()) | ({int(k) for k in f2.tolist() if k >= 0})
+        tasks.append(({k: fs.flights[k] for k in used}, f1, f2, xyz[sl], cand.t_start[sl]))
+    out: list[CandidateScore] = []
+    with ProcessPoolExecutor(
+        max_workers=min(workers, len(tasks)),
+        initializer=_init_scoring_worker,
+        # the workers look up whitened brightness only; the power array stays here
+        initargs=(
+            Spectrogram(spec.t, spec.f, np.zeros((0, 0)), spec.whitened_db),
+            events,
+            cfg.score,
+            known_time_tolerance_s,
+        ),
+    ) as pool:
+        for part in pool.map(_score_chunk, *zip(*tasks, strict=True)):
+            out.extend(part)
     return out
 
 
@@ -147,6 +248,32 @@ def _refine_around(
         index, fs, sub, rlat, rlon, ground(rlat, rlon), events, cfg, known_time_tolerance_s
     )
     return rlat, rlon, rs, np.array([s.total for s in rs]) - penalty_db
+
+
+KNOWN_TIME_PAD_S = 120.0
+"""Seconds beyond a known clip window that flights are still admitted for: sound from 10 km
+away arrives 30 s late, and the scorer's window reaches a minute either side of an event."""
+
+
+def flight_window(
+    priors: AircraftPriors, events: EventSet, duration_s: float
+) -> tuple[float, float]:
+    """Unix-time window a flight must touch to matter: the date prior widened by the clip, or,
+    with a known start, the clip itself give or take the clock tolerance and a margin.
+
+    A known time bounds every flyover the recording can hold, so flights airborne only outside
+    the clip cannot be a source or break a silence window; dropping them before the funnel keeps
+    every candidate the clock would keep afterwards, at a fraction of the work. The window is
+    empty (start after end) when the known time lies outside the date prior.
+    """
+    lo = priors.start.timestamp() - duration_s
+    hi = priors.end.timestamp() + duration_s
+    if events.known_time is not None:
+        t_known = events.known_time.timestamp()
+        pad = events.known_time_tolerance_s + KNOWN_TIME_PAD_S
+        lo = max(lo, t_known - pad)
+        hi = min(hi, t_known + duration_s + pad)
+    return lo, hi
 
 
 def _flight_label(fs: FlightSet, idx: int) -> dict[str, object]:
@@ -196,11 +323,16 @@ def analyze_aircraft(
     mode = "single-event known-time" if events.single_event else "two-event pair"
     if events.single_event and events.known_time is None:
         raise ValueError("single-event mode needs known_time_utc in the events file")
-    t_lo = priors.start.timestamp() - duration
-    t_hi = priors.end.timestamp() + duration
-    fs = FlightSet.build(flights, priors.region, cfg.funnel, t_lo, t_hi)
+    t_lo, t_hi = flight_window(priors, events, duration)
+    if t_hi < t_lo:
+        log.log("the known time lies outside the date prior: no flight can match")
+        fs = FlightSet.build([], priors.region, cfg.funnel)
+    else:
+        fs = FlightSet.build(flights, priors.region, cfg.funnel, t_lo, t_hi)
+    clock = " within the known clip window" if events.known_time is not None else ""
     log.log(
-        f"{mode}: {len(fs)} of {len(flights)} flights admitted; {fs.sample_t.size} indexed samples"
+        f"{mode}: {len(fs)} of {len(flights)} flights admitted{clock}; "
+        f"{fs.sample_t.size} indexed samples"
     )
     ground = GroundHeight(terrain if cfg.use_terrain else None)
     lattice = Lattice(priors.region, cfg.funnel.grid_spacing_m)
@@ -239,7 +371,7 @@ def analyze_aircraft(
         # the clock as a second prior on a two-event search: a candidate's implied start must
         # sit within the clock tolerance, the timing tolerance and event 1's own width
         e1 = events.events[0]
-        half = VALLEY_HALF_T0_S if e1.valley is not None else e1.t0_s.half_width
+        half = VALLEY_HALF_T0_S if e1.profiled else e1.t0_s.half_width
         slack = events.known_time_tolerance_s + cfg.funnel.timing_tolerance_s + half
         keep = np.abs(cand.t_start - events.known_time.timestamp()) <= slack
         cand = cand.subset(keep)
@@ -277,9 +409,13 @@ def analyze_aircraft(
     # closest-approach width (see `time_sweep_for`); two-event mode sweeps its default
     known_tol = events.known_time_tolerance_s if events.single_event else None
     t0 = time.perf_counter()
-    scores = _score_rows(index, fs, cand, cand.lat, cand.lon, heights, events, cfg, known_tol)
+    scores = _score_rows(index, fs, cand, cand.lat, cand.lon, heights, events, cfg, known_tol, spec)
     total = np.array([s.total for s in scores]) - penalty if scores else np.zeros(0)
-    log.log(f"scored {len(cand)} candidates in {time.perf_counter() - t0:.1f} s")
+    workers = _worker_count(cfg) if len(cand) >= cfg.parallel_min_rows else 1
+    log.log(
+        f"scored {len(cand)} candidates in {time.perf_counter() - t0:.1f} s"
+        + (f" on {workers} processes" if workers > 1 else "")
+    )
 
     # group by flight pair: best cell per pair
     pair_key = cand.f1 * 1_000_000 + np.where(cand.f2 >= 0, cand.f2, 0)
@@ -350,7 +486,7 @@ def analyze_aircraft(
             "heard2_unix": pa.array(cand.heard2),
             "slant1_m": pa.array(cand.slant1),
             "slant2_m": pa.array(cand.slant2),
-            "t_start_unix": pa.array([s.t_start for s in scores]),
+            "t_start_unix": pa.array([s.t_start for s in scores], type=pa.float64()),
             "silence_hits": pa.array(
                 cand.silence_hits if cand.silence_hits.size else np.zeros(len(cand), np.int64)
             ),

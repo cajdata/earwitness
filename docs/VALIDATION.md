@@ -38,6 +38,11 @@ around a point and its busiest half hour, which picks the hour of a webcam archi
 | personal-1, known time +-5 s, state box | aircraft single-event known-time | 79712 | none (200 m) | 16.20, margin 0.20 | +7.0 | 46 of 9213 (coarse; nearest 79 m) | flights 3300, candidates 9213 | 481 |
 | personal-1, two events, metro box, no clock | aircraft two-event pair | 46410 | none (200 m) | 19.75, margin 0.13 | -23826.5 | 4307 of 208887 (coarse; nearest 93 m) | flights 1859, pairs 156212, candidates 208887 | 3268 |
 | personal-1, two events (PC-12 re-traced), known time +-2 s, metro box | aircraft two-event pair | 190 | 1 (200 m) | 17.53, margin 12.32 | +0.5 | 4 of 147 (coarse; nearest 93 m) | flights 1859, pairs 166302, candidates 147 after the clock | 1445 |
+| colsto, metro region, run 4 (second pass: implied-start prefilter, 12 scoring processes) | aircraft two-event pair | 173 | 1 (200 m) | 19.88, margin 1.61 | +0.4 | 1 of 244711 (coarse; nearest 55 m) | flights 3549, pairs 44480, candidates 244711 | 510 |
+| colsto, two events, clock assumed +-2 s, metro box | aircraft two-event pair | 173 | 1 (200 m) | 19.88, margin 14.43 | +0.4 | 1 of 493 (coarse; nearest 55 m) | flights 336, pairs 7695, candidates 493 | 86 |
+| personal-1, two events, known time +-2 s, metro box, flights limited to the clip window | aircraft two-event pair | 190 | 1 (200 m) | 17.53, margin 12.32 | +0.5 | 4 of 147 (coarse; nearest 93 m) | flights 92, pairs 5919, candidates 147 | 86 |
+| thunder-1, public field recording (30 min, rural night), state-sized box, local date | thunder | 479316 | none (5 km) | 0.842, margin 0.000 | n/a | none of 10 (final; nearest 29928 m) | grid 46057, on_land 44257, prefilter 36089 | 51 |
+| thunder-2, public field recording (60 min, front porch), state-sized box, one day | thunder | 73170 | none (5 km) | 0.788, margin 0.031 | n/a | none of 10 (final; nearest 55377 m) | grid 8721, prefilter 4000 | 20 |
 
 Run 2 is the reference case solved: the two flyovers measured with the project's own trace
 and fit tools, searched blind over a 1.8 by 1.0 degree box around the metropolitan area the
@@ -46,7 +51,8 @@ video's last minute reveals, rank the published site first, 173 m off, with a ma
 and the same two aircraft colsto found; 73 min on one core (prefilter 3 min, funnel 18 min,
 scoring 54 min). The start error is measured against a start derived from those tracks
 and the fitted closest-approach time, since the video gives no clock. This is the aircraft
-half of the acceptance criterion; the thunder half is open. Run 1, the same search a day
+half of the acceptance criterion; the thunder half, two public field recordings that were
+not located, is in the second pass below. Run 1, the same search a day
 earlier in the session, is the failure the bullet on the heard crossing below explains:
 the true pair's cells sat 55 m from the site and scored below zero because the search
 clock started 18 s late. The continental search colsto himself ran is not reproduced, for
@@ -156,12 +162,200 @@ Status of the inputs and the findings on 2026-11-04:
   himself calls the typical case and which his video reveals in its last minute; the
   continental search stays on the list with the two changes it needs, a vectorized
   candidate scorer and a prefilter that indexes samples by the recording start they imply
-  at their own speed.
-- Personal recordings: none yet. An aircraft case can be recorded any day near a
-  general-aviation airport (20 minutes of WAV at 48 kHz, start time noted against an NTP clock
-  to a second); a thunder case needs a storm, or a livestream while the storm watch shows one.
+  at their own speed (both built in the second pass below, which cut this search from 73 to
+  8.5 minutes with the same answer).
+- Personal recordings: personal-1 above, an aircraft case. No personal thunder recording yet,
+  out of storm season; the thunder cases in the second pass are public field recordings with
+  published locations.
 - ffmpeg 9.0 is installed on the development machine, so phone and camera files (AAC in MP4 or
   M4A) and the reference recording's Opus decode; without it only WAV, FLAC and OGG do.
+
+### Second pass, 2026-11-05: review, M4 rerun, thunder, short clips and scale
+
+**Review of the M6 commit.** A review of a913b1d (funnel, fit, scorer, pipeline, flight
+preparation, events, terrain, CLI, tests and UI) found five defects, each fixed with a test. The
+scorer narrowed a profiled event with the speed at the track's nearest pass to the candidate,
+not the pass heard during the event, so an aircraft passing a point twice at different speeds,
+as pattern traffic does, was narrowed with the wrong row: a test track heard on a 40 m/s pass
+was narrowed to its later, nearer 90 m/s pass, 6 Hz and 10 s off. It now finds the closest
+approach among track times whose sound arrives inside the event's window. In the UI, Load put a
+fitted event's range midpoints on the sliders (185 m/s at 25 km for the reference recording's
+139 m/s, 6.2 km fit), Update right after Load replaced the event's ranges with slider defaults
+and dropped its speed profile, and after Add the list's re-sort left the selection on the
+neighbouring event, so the next Update overwrote it; Load now restores the fit's best profile
+row, Update keeps an event's own ranges and profile until a slider moves, and the selection
+follows the saved event. The fit panel's help text still called the t0 slider the heard
+crossing, and the sliders stopped at 160 m/s and 5 km, short of the reference's loud flyover.
+The clock filter treated an event with an empty profile as profiled, and a run with no
+candidates wrote an untyped column. Checked and found correct: unprofiled events (the synthetic
+path), single-event mode with and without profiles, an empty set after the clock filter, the
+chunked prefilter (the same hints in the same order as the loop it replaced, at chunk sizes of
+7, 113 and 20,000 rows, with and without the cap), the heard-time conversions in the fit and the
+UI, terrain tile grouping at tile edges (20,000 random points and the edge cases) and
+track-cache eviction (a cache of one track reproduces a run exactly). The true sites of both
+solved cases score exactly as before the fixes.
+
+Two further changes came from the review. A known recording time now limits the flights to those
+airborne within the clip, before the funnel (`pipeline.flight_window`): personal-1's clocked
+two-event search keeps the same 147 candidates and the same answer in 86 s instead of 24 min.
+And the auto-trace's noise level is now the view's 25th-percentile frame
+(`audio.spectrogram.trace_line`): it was the median of the view's bright frames and every dim
+frame of the whole file, so the same view traced differently in a clip and in the full
+recording, and a loud line filling most of the view kept only its brightest seconds (in a 60 s
+excerpt, 13 points of the reference's loud flyover against 312 with the new level).
+
+**M4 rerun.** The acceptance harness, rerun after the fixes with the commands of the M4 section,
+again places 10 of 10 two-event and 10 of 10 single-event cases first within 200 m. Two-event
+mode matches its table with every pair correct and the same rank-1 errors except case 2 (12 m,
+was 16 m) and margins within 0.6 dB, keeps as many or more truth cells (the exact check finds
+band-edge cells the two-tube join missed) and ran in 36 min against 2 h 33 min, the funnel
+rework's doing. Single-event mode matches case for case, with 0.2 to 3.6% fewer candidates (each
+cell's speed at closest approach is now checked), in 8 min 26 s. With the implied-start
+prefilter below as the default, the two-event harness ran once more: 10 of 10 again, every pair
+correct, with the same rank-1 errors and margins, in 26 min 35 s; it keeps fewer of the cells
+around the site in three cases (9 to 15 where the run before kept 18 to 20), not the answers.
+
+**Thunder cases.** Two public field recordings from the radio aporee archive on the Internet
+Archive, both under a public-domain mark, both with the recordist's position (GPS in one, a
+street address in the other) and a stated local start, and both inside GOES-East coverage with
+GLM lightning within 25 km at their stated times, were analysed blind: the date the recordist
+gives (a day around the stated time for thunder-2) as the time prior and a box the size of the
+region the title names as the region prior (about 1.1 million km2 and 220,000 km2), default
+settings, the truth in private files read only at scoring. Neither was located (rows thunder-1
+and thunder-2 above). thunder-1, 30 minutes of a rural night with 18 loudness peaks, ranks a
+point 479 km away first; the runner-up, 0.001 lower, sits 30 km from the site. thunder-2, an
+hour on a front porch as a storm line arrives, with 30 peaks under building rain, ranks a point
+73 km away first; the nearest coarse cell to the site ranks 601st of 4,000. Scoring each true
+site by hand over the same prior (a 5 km box around it) shows why: the truth scores below the
+impostors, 0.78 against 0.84 for thunder-1 and 0.71 against 0.79 for thunder-2, and their own
+scores barely move with a 50 km audible radius (0.79 and 0.71) and fall with the Pearson score
+(0.53 and 0.47). Both storms were dense. thunder-2's true site finds its best start at 05:05:55
+UTC, six minutes after the recordist's stated midnight, with 1,186 GLM flashes within 25 km
+during the hour; thunder-1's evening held up to 571 flashes an hour within 25 km, and restricted
+to the recordist's stated evening the true site matches nothing (0.58 at the window's first
+minute). At 20 or more flashes a minute the claps overlap into a rolling envelope that the model
+renders for any dense patch of the storm, and the observed envelope, with rain in the same 20 to
+250 Hz band, has nothing distinctive left to match: the regime the M2 notes flagged with
+synthetic dense storms, now seen on real ones. The thunder half of the criterion is documented
+with these two failures; a success needs a sparse storm, a few distinct claps a minute, and the
+storm watch is the way to catch one.
+
+**Short clips.** `scripts/m6_clip_sweep.py` cuts each aircraft recording to excerpts centered on
+a flyover (or on the midpoint of two), fits the events from the analyst's own trace cut to the
+excerpt, and searches each excerpt over the same metro box with the clock: the recording's start
+plus the excerpt's offset, to plus or minus 2 s. For the reference recording the clock is
+assumed, the start the ADS-B tracks imply, standing in for a camera's timestamp; personal-1's is
+the phone's own. Rank 1 within 200 m, or the rank-1 error when the first rank within 200 m is
+not in the top ten:
+
+personal-1 (the two flyovers pass 97 s apart):
+
+| clip (s) | both flyovers + clock | loud flyover alone + clock | faint flyover alone + clock |
+| --- | --- | --- | --- |
+| 1274 | rank 1, 190 m | rank 5 | none (55.5 km) |
+| 600 | rank 1, 190 m | rank 4 | none (4.8 km) |
+| 300 | rank 1, 190 m | rank 5 | none (4.8 km) |
+| 180 | rank 1, 190 m | rank 5 | none (4.8 km) |
+| 150 | rank 1, 130 m | none (11.5 km) | none (4.8 km) |
+| 120 | none (235 m) | none (11.5 km) | none (4.8 km) |
+| 105 | does not fit | none (43.4 km) | none (4.8 km) |
+| 90 | does not fit | none (43.4 km) | none (55.8 km) |
+| 60 | does not fit | rank 4 | none (55.8 km) |
+| 45 | does not fit | none (43.5 km) | none (46.2 km) |
+| 30 | does not fit | none (31.9 km) | none (55.8 km) |
+| 20 | does not fit | none (50.8 km) | none (55.9 km) |
+
+Reference recording (the two flyovers pass 924 s apart):
+
+| clip (s) | both flyovers + clock | loud flyover alone + clock | faint flyover alone + clock |
+| --- | --- | --- | --- |
+| 3600 | rank 1, 173 m | none (675 m) | none (211 m) |
+| 1800 | rank 1, 173 m | none (675 m) | rank 1, 155 m |
+| 1200 | rank 1, 173 m | none (675 m) | none (211 m) |
+| 1000 | rank 1, 164 m | none (675 m) | none (211 m) |
+| 600 | does not fit | none (675 m) | rank 1, 177 m |
+| 300 | does not fit | none (675 m) | none (211 m) |
+| 180 | does not fit | none (675 m) | none (211 m) |
+| 120 | does not fit | none (675 m) | rank 1, 136 m |
+| 90 | does not fit | none (669 m) | rank 1, 95 m |
+| 60 | does not fit | none (457 m) | none (511 m) |
+| 45 | does not fit | none (5.0 km) | none (6.7 km) |
+| 30 | does not fit | none (12.2 km) | none (6.7 km) |
+| 20 | does not fit | none (93.3 km) | none (38.7 km) |
+
+The two flyovers with the clock locate personal-1 in every excerpt that holds both, down to 150
+s (130 m off, margin 12.7); at 120 s the excerpt edge cuts the loud flyover's trace and the
+answer, the right pair, lands 235 m off. The reference recording's two flyovers are 15 minutes
+apart, so that mode needs 1,000 s or more, and there it is 164 to 173 m off at rank 1. A single
+flyover with a clock depends on the aircraft: the reference's faint turboprop, 3.5 km out,
+stands out among the region's flights at that minute (a lead of 0.9 to 1.7 over the next), and
+alone with the clock it places the site 95 to 211 m off in every excerpt from 90 s to the full
+hour (first within 200 m in four of those nine lengths, by 11 m or less outside it in the other
+five), 511 m off at 60 s and lost below that; its loud flyover, 6 km out, finds the right
+aircraft but a point about 670 m off at every length from 90 s up, because a distant pass
+constrains the distance poorly. personal-1's loud flyover, a trainer at pattern speed in a
+training-dense metro, ranks 4th or 5th from 180 s up and at 60 s, outside the top ten at the
+other lengths and never first, behind other trainers with nearly the same score, and its faint
+second aircraft alone is never found. So the shortest clip is set by the mode: with a clock, a
+distinctive aircraft alone needs about 90 s around its flyover, and a common trainer is
+ambiguous at any length unless a second flyover is in the clip, in which case the clip needs
+only to span both with about 25 s on either side. Without a clock, two flyovers must be in the
+clip anyway, and the search is the slower two-event one.
+
+Re-tracing each excerpt with the UI's auto-trace, as fixed in this pass, instead of cutting the
+analyst's trace gives the same picture for two flyovers with a clock (rank 1 at 134 to 180 m
+from the full clip down to 150 s for personal-1, 164 to 194 m for the reference) and places the
+reference's faint flyover alone 261 to 366 m off in every excerpt from 60 s to the full hour,
+where the analyst's checked trace gave 95 to 211 m: the auto-trace takes 215 to 219 points of
+that faint line against the analyst's 180, and its fit, and with it the position, is looser.
+With the auto-trace as it was before this pass, the reference's loud flyover traced to 25 to 76
+points in every excerpt of 1,800 s and shorter, and its single-event rows failed there (run
+folders `runs/m6-*-clips`, `-clips-cut` and `-clips-retrace`).
+
+**A scorer window that follows the visible span.** personal-1's faint second event scored only
++1.8 dB because its line is visible for 22 s of the scorer's 120 s window, so scoring each
+traced event only over its trace's span plus a margin was built (`ScoreConfig.trace_window`) and
+tried on the clocked searches of both recordings and on the reference search:
+
+| case and mode (lead of the true pair over the best other pair) | fixed 120 s window | traced span + 10 s | + 20 s | + 30 s | + 45 s |
+| --- | --- | --- | --- | --- | --- |
+| personal-1, both flyovers + clock | rank 1, 190 m, margin 12.9 | rank 1, 134 m, 17.7 | rank 1, 143 m, 15.3 | rank 1, 130 m, 13.3 | rank 1, 190 m, 11.8 |
+| personal-1, loud flyover + clock | rank 5 | pair 3rd, refined >200 m | pair 3rd, >200 m | pair 3rd, >200 m | pair 4th, >200 m |
+| reference, both flyovers + clock | rank 1, 173 m, margin 14.0 | 318 m | rank 1, 185 m | 206 m | rank 1, 129 m |
+| reference, faint flyover + clock | rank 1, 155 m, margin 1.3 | 65.8 km | 45.2 km | rank 1, 191 m | rank 1, 95 m |
+| reference, loud flyover + clock | 675 m, margin 3.6 | 571 m, 1.0 | 598 m, 2.3 | 675 m, 3.2 | 695 m, 3.6 |
+| reference, both flyovers, no clock (metro search) | rank 1, 173 m | 318 m (truth 4th) | | | |
+
+The narrower window lifts a faint event's own score, as intended, but costs more than it gives:
+the reference search without a clock loses its answer, and the reference's faint flyover alone
+is lost entirely at 10 and 20 s margins. Its trace ends at 3,067 s while the aircraft's heard
+crossing is at 3,079 s, so a window built from the trace cuts out closest approach itself; the
+scorer integrates brightness along the predicted curve, so it gains from line too faint to
+trace, and the untraced wings are where look-alike aircraft differ. The fixed window stays the
+default and the option stays off.
+
+**Continental scale.** The two changes the first pass named are built. The pair prefilter now
+indexes each sample by the recording start it implies at its own speed (its time plus the
+event's distance at that speed over c, minus the event's heard crossing at that speed), so the
+two events' samples are matched within the events' narrowed widths, the timing tolerance and one
+index step, about 20 to 45 s, instead of within the reach over the slowest speed, about 1,000 s
+with honest speed ranges. On the reference search over the metro box it returns 18.9 million
+sample pairs and 44,480 hints in 9 s against 381 million pairs and 131,274 hints in 176 s; the
+funnel then takes 314 s instead of 1,072 s and the true pair still ranks first. On a box 200 km
+on a side around the reference site, the first pass's measure of continental cost, the new mode
+returns 27 million sample pairs and 62,037 hints in 13 s against 553 million and 171,198 in 273
+s for the old mode on the same 4,968 flights; on personal-1's metro box, 63 million pairs and
+68,760 hints in 36 s against 1.37 billion and 166,302 in 715 s, after which the funnel keeps the
+true pair's cells beside the site (10 within 300 m, the nearest 93 m) among 256,778 candidates.
+The old mode stays as `FunnelConfig(prefilter="gap")`. The scorer was profiled at 9 to 16 ms a
+candidate, most of it in brightness lookups that strided across the whitened spectrogram; a
+frame-major copy makes them 18% faster with identical scores, while sweeping every start option
+in one numpy call was three times slower (the arrays leave the cache). Candidates are
+independent, so `--workers N` scores them in a process pool, a chunk of rows per task with only
+the flights it needs, with scores identical to the serial ones: 244,711 candidates in 160 s on
+12 processes, 0.65 ms a candidate of wall time against 9.1 ms on one core (run 2 scored 355,189
+in 54 minutes). The reference search over the metro box now takes 8.5 minutes instead of 73,
+with the same answer.
 
 ## M5: desktop UI, from a file to a heat map without the CLI
 

@@ -103,10 +103,23 @@ interface Params {
 
 const SLIDERS: { key: keyof Params; label: string; min: number; max: number; step: number; unit: string }[] = [
   { key: "f0", label: "f0", min: 10, max: 400, step: 0.5, unit: "Hz" },
-  { key: "v", label: "speed", min: 5, max: 160, step: 0.5, unit: "m/s" },
-  { key: "d", label: "distance", min: 20, max: 5000, step: 5, unit: "m" },
+  { key: "v", label: "speed", min: 5, max: 300, step: 0.5, unit: "m/s" },
+  { key: "d", label: "distance", min: 20, max: 10000, step: 5, unit: "m" },
   { key: "t0", label: "t0", min: 0, max: 1, step: 0.1, unit: "s" },
 ];
+
+type Ranges = Pick<FlyoverEvent, "t0_s" | "f0_hz" | "v_mps" | "d_m">;
+
+function copyRanges(r: Ranges): Ranges {
+  return { t0_s: [r.t0_s[0], r.t0_s[1]], f0_hz: [r.f0_hz[0], r.f0_hz[1]], v_mps: [r.v_mps[0], r.v_mps[1]], d_m: [r.d_m[0], r.d_m[1]] };
+}
+
+/** The valley row to put on the sliders: the best fit when the rows carry their rms (a fifth
+ * column, as the fit returns them), else the middle row, since every row fits the trace. */
+function bestValleyRow(valley: number[][]): number[] {
+  if (valley[0].length >= 5) return valley.reduce((a, b) => (b[4] < a[4] ? b : a));
+  return valley[Math.floor(valley.length / 2)];
+}
 
 function mountAircraft(container: HTMLElement): () => void {
   const rec = state.recording!;
@@ -114,6 +127,12 @@ function mountAircraft(container: HTMLElement): () => void {
   let spec: SpectrogramView | null = null;
   let preview: PreviewResult | null = null;
   let fitResult: FitResult | null = null;
+  // What Add or Update saves while the sliders still show it: the fit's ranges and speed
+  // profile, or a loaded event's own. Once a slider moves, ranges around the sliders.
+  let source: { kind: "fit" | "event"; params: Params; ranges: Ranges; valley: number[][] | null } | null = null;
+  const saveNote = h("span", { class: "muted" });
+  const profileBox = h("div");
+  const profilePlot = h("div", { class: "plot short" });
   let trace: [number, number][] = [];
   let selected: number | null = null;
   let mode: "zoom" | "trace" | "silence" = "zoom";
@@ -347,6 +366,7 @@ function mountAircraft(container: HTMLElement): () => void {
   // ------------------------------------------------------------------------- fit tools
   function renderFit(): void {
     clear(fitBox);
+    renderSaveNote();
     const grid = h("div", { class: "sliders" });
     for (const s of SLIDERS) {
       const max = s.key === "t0" ? duration : s.max;
@@ -355,6 +375,7 @@ function mountAircraft(container: HTMLElement): () => void {
       range.addEventListener("input", () => {
         params[s.key] = Number(range.value);
         num.value = range.value;
+        renderSaveNote();
         updatePreview();
       });
       grid.append(h("span", {}, `${s.label} (${s.unit})`), range, num);
@@ -364,7 +385,7 @@ function mountAircraft(container: HTMLElement): () => void {
       updatePreview();
     }, { min: 1, max: 12, step: 1, width: "70px" });
     fitBox.append(
-      h("p", { class: "muted" }, "Move the sliders until the orange curve sits on the sweeping line. t0 is the heard closest approach, where the tone crosses f0."),
+      h("p", { class: "muted" }, "Move the sliders until the orange curve sits on the sweeping line. t0 is the closest approach, when the aircraft is nearest; the tone crosses f0 one sound delay (distance / 343 m/s) later, and the event stores that heard crossing."),
       grid,
       h("div", { class: "row" }, field("harmonics drawn and scored", harmonicsIn)),
       h("h3", {}, "Trace"),
@@ -387,11 +408,13 @@ function mountAircraft(container: HTMLElement): () => void {
               `f0 ${fitResult.ranges.f0_hz.map((x) => x.toFixed(1)).join("–")} Hz · v ${fitResult.ranges.v_mps.map((x) => x.toFixed(0)).join("–")} m/s · ` +
               `d ${fitResult.ranges.d_m.map((x) => x.toFixed(0)).join("–")} m · t0 ${fitResult.ranges.t0_s.map((x) => x.toFixed(1)).join("–")} s`,
           )
-        : h("p", { class: "muted" }, "Auto-trace follows the brightest line in the current view; add or remove points by clicking, then fit."),
+        : h("p", { class: "muted" }, "Auto-trace follows the brightest line in the current view (keep some of the view off the line); add or remove points by clicking, then fit."),
+      profileBox,
       h(
         "div",
         { class: "row" },
-        button(selected === null ? "Add event from this fit" : `Update ${state.events.events[selected]?.id ?? "event"} from this fit`, () => saveEvent(), "btn primary"),
+        button(selected === null ? "Add event" : `Update ${state.events.events[selected]?.id ?? "event"}`, () => saveEvent(), "btn primary"),
+        saveNote,
         selected !== null ? button("New event instead", () => {
           selected = null;
           renderFit();
@@ -399,12 +422,95 @@ function mountAircraft(container: HTMLElement): () => void {
         }, "btn small") : null,
       ),
     );
+    void renderProfile();
+  }
+
+  /** The profile to show: the fit's, or the selected event's when it carries one. */
+  function shownProfile(): { rows: number[][]; label: string } | null {
+    if (fitResult?.valley?.length) return { rows: fitResult.valley, label: "this fit" };
+    const ev = selected !== null ? state.events.events[selected] : undefined;
+    if (ev?.valley?.length) return { rows: ev.valley, label: ev.id };
+    return null;
+  }
+
+  async function renderProfile(): Promise<void> {
+    clear(profileBox);
+    const shown = shownProfile();
+    if (!shown) {
+      plots.purge(profilePlot);
+      return;
+    }
+    const rows = [...shown.rows].sort((a, b) => a[0] - b[0]);
+    const best = rows[0].length >= 5 ? rows.reduce((a, b) => (b[4] < a[4] ? b : a)) : null;
+    const v = rows.map((r) => r[0]);
+    const text = rows.map(
+      (r) =>
+        `${r[0].toFixed(0)} m/s · ${(r[1] / 1000).toFixed(2)} km · f0 ${r[2].toFixed(1)} Hz · heard ${r[3].toFixed(1)} s` +
+        (r.length >= 5 ? ` · rms ${r[4].toFixed(2)} Hz` : ""),
+    );
+    profileBox.append(
+      h("h3", {}, `Speed profile (${shown.label})`),
+      h(
+        "p",
+        { class: "muted" },
+        `${rows.length} held speeds from ${v[0].toFixed(0)} to ${v[v.length - 1].toFixed(0)} m/s fit the trace within 0.5 Hz rms of the best. ` +
+          "A trace without the curve's wings fixes only speed² / distance; the search tests each flight at its own speed with that row's distance, fundamental and heard crossing. Tracing both wings narrows the list.",
+      ),
+      profilePlot,
+    );
+    const traces: plots.Trace[] = [
+      {
+        type: "scatter",
+        mode: "lines+markers",
+        x: v,
+        y: rows.map((r) => r[1] / 1000),
+        text,
+        hovertemplate: "%{text}<extra></extra>",
+        line: { color: "#1d4ed8", width: 1.5 },
+        marker: { size: 6, color: "#1d4ed8" },
+      },
+    ];
+    if (best) {
+      traces.push({
+        type: "scatter",
+        mode: "markers",
+        x: [best[0]],
+        y: [best[1] / 1000],
+        marker: { size: 11, color: "#f97316", symbol: "diamond" },
+        hoverinfo: "skip",
+      });
+    }
+    await plots.draw(
+      profilePlot,
+      traces,
+      plots.baseLayout({
+        height: 220,
+        margin: { l: 56, r: 12, t: 8, b: 40 },
+        xaxis: { title: { text: "speed (m/s)" } },
+        yaxis: { title: { text: "closest distance (km)" }, rangemode: "tozero" },
+      }),
+    );
   }
 
   function setParam(key: keyof Params, value: number): void {
     params[key] = value;
     renderFit();
     updatePreview();
+  }
+
+  function sourceIntact(): boolean {
+    if (!source) return false;
+    const was = source.params;
+    return (Object.keys(params) as (keyof Params)[]).every((k) => Math.abs(params[k] - was[k]) < 1e-9);
+  }
+
+  function renderSaveNote(): void {
+    const profile = source?.valley?.length ? " and speed profile" : "";
+    saveNote.textContent = !sourceIntact()
+      ? "saves ranges around the sliders"
+      : source!.kind === "fit"
+        ? `saves the fit's ranges${profile}`
+        : `keeps the loaded event's ranges${profile}`;
   }
 
   async function autoTrace(): Promise<void> {
@@ -430,6 +536,7 @@ function mountAircraft(container: HTMLElement): () => void {
       params.v = fitResult.v_mps;
       params.d = fitResult.d_m;
       params.t0 = fitResult.t0_s;
+      source = { kind: "fit", params: { ...params }, ranges: copyRanges(fitResult.ranges), valley: fitResult.valley ?? null };
       renderFit();
       updatePreview();
     } catch (err) {
@@ -437,30 +544,36 @@ function mountAircraft(container: HTMLElement): () => void {
     }
   }
 
-  function rangesFromState(): Pick<FlyoverEvent, "t0_s" | "f0_hz" | "v_mps" | "d_m"> {
-    if (fitResult) return fitResult.ranges;
+  function rangesFromState(): { ranges: Ranges; valley: number[][] | null } {
+    if (source && sourceIntact()) return { ranges: copyRanges(source.ranges), valley: source.valley };
     return {
-      // the event's t0 is the heard crossing; the preview's t0 is the closest approach itself
-      t0_s: [Math.max(0, params.t0 + params.d / 343 - 3), params.t0 + params.d / 343 + 3],
-      f0_hz: [Math.max(10, params.f0 - 3), params.f0 + 3],
-      v_mps: [Math.max(5, params.v * 0.8), params.v * 1.2],
-      d_m: [Math.max(20, params.d * 0.5), params.d * 1.5],
+      ranges: {
+        // the event's t0 is the heard crossing; the preview's t0 is the closest approach itself
+        t0_s: [Math.max(0, params.t0 + params.d / 343 - 3), params.t0 + params.d / 343 + 3],
+        f0_hz: [Math.max(10, params.f0 - 3), params.f0 + 3],
+        v_mps: [Math.max(5, params.v * 0.8), params.v * 1.2],
+        d_m: [Math.max(20, params.d * 0.5), params.d * 1.5],
+      },
+      valley: null,
     };
   }
 
   function saveEvent(): void {
-    const ranges = rangesFromState();
+    const { ranges, valley } = rangesFromState();
     const tracePts = trace.length ? trace.map((p) => [Math.round(p[0] * 100) / 100, Math.round(p[1] * 100) / 100] as [number, number]) : null;
+    let target: FlyoverEvent;
     if (selected === null) {
-      const ev = newEvent(params.t0, params.f0);
-      Object.assign(ev, ranges, { harmonics, trace: tracePts, valley: fitResult?.valley ?? null });
-      state.events.events.push(ev);
-      selected = state.events.events.length - 1;
+      target = newEvent(params.t0, params.f0);
+      Object.assign(target, ranges, { harmonics, trace: tracePts, valley });
+      state.events.events.push(target);
     } else {
-      Object.assign(state.events.events[selected], ranges, { harmonics, trace: tracePts, valley: fitResult?.valley ?? null });
+      target = state.events.events[selected];
+      Object.assign(target, ranges, { harmonics, trace: tracePts, valley });
     }
     state.events.events.sort((a, b) => a.t0_s[0] - b.t0_s[0]);
     state.events.events.forEach((ev, i) => (ev.id = `e${i + 1}`));
+    // the sort can move the saved event: keep the selection on it, not on its old index
+    selected = state.events.events.indexOf(target);
     save();
     emit("events");
     renderEvents();
@@ -509,6 +622,13 @@ function mountAircraft(container: HTMLElement): () => void {
           h("td", { class: "muted" }, ev.trace ? `${ev.trace.length} pts` : "none"),
           h(
             "td",
+            { class: "muted" },
+            ev.valley?.length
+              ? `${Math.min(...ev.valley.map((r) => r[0])).toFixed(0)}–${Math.max(...ev.valley.map((r) => r[0])).toFixed(0)} m/s`
+              : "none",
+          ),
+          h(
+            "td",
             {},
             button("Load", () => selectEvent(i), "btn small"),
             " ",
@@ -529,7 +649,7 @@ function mountAircraft(container: HTMLElement): () => void {
         h(
           "table",
           { class: "table" },
-          h("thead", {}, h("tr", {}, ...["event", "t0 (s)", "f0 (Hz)", "speed (m/s)", "distance (m)", "harm.", "trace", ""].map((t) => h("th", {}, t)))),
+          h("thead", {}, h("tr", {}, ...["event", "heard t0 (s)", "f0 (Hz)", "speed (m/s)", "distance (m)", "harm.", "trace", "profile", ""].map((t) => h("th", {}, t)))),
           h("tbody", {}, ...rows),
         ),
       );
@@ -551,14 +671,25 @@ function mountAircraft(container: HTMLElement): () => void {
   function selectEvent(i: number): void {
     const ev = state.events.events[i];
     selected = i;
-    params.t0 = (ev.t0_s[0] + ev.t0_s[1]) / 2 - (ev.d_m[0] + ev.d_m[1]) / 2 / 343;
-    params.f0 = (ev.f0_hz[0] + ev.f0_hz[1]) / 2;
-    params.v = (ev.v_mps[0] + ev.v_mps[1]) / 2;
-    params.d = (ev.d_m[0] + ev.d_m[1]) / 2;
+    if (ev.valley?.length) {
+      // a fitted event: its ranges span the whole speed profile, so their midpoints describe
+      // no curve the trace allows; a row of the profile does, with its own closest approach
+      const row = bestValleyRow(ev.valley);
+      params.v = row[0];
+      params.d = row[1];
+      params.f0 = row[2];
+      params.t0 = row[3] - row[1] / 343;
+    } else {
+      params.t0 = (ev.t0_s[0] + ev.t0_s[1]) / 2 - (ev.d_m[0] + ev.d_m[1]) / 2 / 343;
+      params.f0 = (ev.f0_hz[0] + ev.f0_hz[1]) / 2;
+      params.v = (ev.v_mps[0] + ev.v_mps[1]) / 2;
+      params.d = (ev.d_m[0] + ev.d_m[1]) / 2;
+    }
     harmonics = ev.harmonics;
     trace = ev.trace ? ev.trace.map((p) => [p[0], p[1]]) : [];
     fitResult = null;
-    const half = Math.max(90, (ev.d_m[1] / Math.max(ev.v_mps[0], 10)) * 4);
+    source = { kind: "event", params: { ...params }, ranges: copyRanges(ev), valley: ev.valley ?? null };
+    const half = Math.max(90, (params.d / Math.max(params.v, 10)) * 6);
     view.tLo = Math.max(0, params.t0 - half);
     view.tHi = Math.min(duration, params.t0 + half);
     view.fLo = Math.max(0, params.f0 * 0.6);
@@ -688,5 +819,8 @@ function mountAircraft(container: HTMLElement): () => void {
   renderEvents();
   renderSilence();
   void load();
-  return () => plots.purge(plot);
+  return () => {
+    plots.purge(plot);
+    plots.purge(profilePlot);
+  };
 }

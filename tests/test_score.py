@@ -132,3 +132,80 @@ def test_known_time_sweep_uses_the_narrowed_width_not_the_envelope():
     assert time_sweep_for(narrowed, cfg) == 3.0  # two-event default, at least cfg.time_sweep_s
     assert time_sweep_for(wide, cfg) == 31.0
     assert time_sweep_for(wide, cfg, time_sweep_s=4.0) == 4.0
+
+
+def test_at_track_speed_uses_the_pass_heard_not_the_nearest():
+    import sys
+    from pathlib import Path
+
+    from earwitness.aircraft.score import at_track_speed
+    from earwitness.audio.events import FlyoverEvent, Range
+
+    sys.path.insert(0, str(Path(__file__).parent))
+    from test_aircraft_model import _two_pass_track
+
+    tr = _two_pass_track()  # 40 m/s pass heard at 302 s, a nearer 90 m/s pass later
+    valley = np.array([[40.0, 671.0, 110.0, 302.0], [90.0, 3400.0, 104.0, 312.0]])
+    event = FlyoverEvent(
+        "e1", Range(296.0, 318.0), Range(98.0, 116.0), Range(28.0, 117.0), Range(300.0, 5100.0),
+        valley=valley,
+    )  # fmt: skip
+    heard = at_track_speed(event, tr, ORIGIN, t_start=0.0)
+    np.testing.assert_allclose([heard.f0_hz.lo, heard.f0_hz.hi], [107.0, 113.0], atol=0.01)
+    np.testing.assert_allclose([heard.t0_s.lo, heard.t0_s.hi], [299.0, 305.0], atol=0.01)
+    # without the recording start, the nearest pass of the whole track decides
+    nearest = at_track_speed(event, tr, ORIGIN)
+    np.testing.assert_allclose([nearest.f0_hz.lo, nearest.f0_hz.hi], [101.0, 107.0], atol=0.01)
+    # an empty profile is no profile
+    empty = FlyoverEvent(
+        "e1", Range(296.0, 318.0), Range(98.0, 116.0), Range(28.0, 117.0), Range(300.0, 5100.0),
+        valley=np.zeros((0, 4)),
+    )  # fmt: skip
+    assert not empty.profiled
+    assert at_track_speed(empty, tr, ORIGIN, t_start=0.0) is empty
+
+
+def test_the_trace_window_option_scores_only_where_the_line_was_traced():
+    from earwitness.aircraft.score import SpectrogramIndex, event_window, score_event
+    from earwitness.audio.events import FlyoverEvent, Range
+    from earwitness.audio.spectrogram import Spectrogram
+
+    # noise everywhere and a faint line, 6 dB, along the true curve for only 20 s around the
+    # heard closest approach, the way a distant turboprop shows in a phone recording
+    rng = np.random.default_rng(7)
+    t = np.arange(0.0, 400.0, 0.128)
+    f = np.arange(0.0, 600.0, 1.0)
+    db = rng.normal(0.0, 2.0, size=(f.size, t.size))
+    tr = am.straight_track(90.0, 90.0, 800.0, 1500.0, 200.0, 0.0, 400.0, 1.0)
+    cfg = ScoreConfig()
+    heard = 200.0 + float(np.hypot(800.0, 1500.0)) / cfg.speed_of_sound
+    visible = np.flatnonzero((t >= heard - 10.0) & (t <= heard + 10.0))
+    line = 150.0 * frequency_ratio(tr, ORIGIN, t[visible], cfg)
+    for k in (0, 1):  # two bins wide, so the linear interpolation sees 6 dB all along it
+        db[np.floor(line).astype(int) + k, visible] += 6.0
+    index = SpectrogramIndex(Spectrogram(t=t, f=f, power=np.ones_like(db), whitened_db=db))
+    cfg = ScoreConfig(trace_window=True)  # an option; the fixed window is the default
+    ranges = (Range.around(heard, 3.0), Range.around(150.0, 3.0), Range(70, 110), Range(900, 2600))
+    traced = FlyoverEvent("e2", *ranges, trace=np.column_stack([t[visible], line]))
+    plain = FlyoverEvent("e2", *ranges)
+    assert event_window(plain, cfg) == (heard - 60.0, heard + 60.0)
+    assert event_window(traced, ScoreConfig()) == (heard - 60.0, heard + 60.0)
+    lo, hi = event_window(traced, cfg)
+    assert abs(lo - (t[visible][0] - 10.0)) < 1e-9
+    assert abs(hi - (t[visible][-1] + 10.0)) < 1e-9
+    whole = score_event(index, tr, ORIGIN, traced, 0.0, ScoreConfig(trace_window=False), None)
+    seen = score_event(index, tr, ORIGIN, traced, 0.0, cfg, None)
+    # worked numbers: with weights d / slant the visible 20 s carry 19.2 of the 70.7 weighted
+    # seconds of the 120 s window and 19.2 of 34.8 of the trace window, so the line's 6 dB
+    # averages to about 1.6 dB and 3.3 dB
+    assert 1.2 < whole.score < 2.3
+    assert 2.8 < seen.score < 4.0
+    assert whole.frames > 2.5 * seen.frames
+    # a point 1.5 km off sees a different curve and stays well below the site either way
+    off = geodesy_offset(1500.0)
+    assert score_event(index, tr, off, traced, 0.0, cfg, None).score < 0.5 * seen.score
+
+
+def geodesy_offset(east_m: float) -> np.ndarray:
+    """An observer `east_m` east of the origin in the tracks' local frame."""
+    return np.array([east_m, 0.0, 0.0])
