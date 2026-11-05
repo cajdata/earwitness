@@ -60,6 +60,8 @@ export interface FitResult {
   rms_hz: number;
   n_points: number;
   ranges: Record<ParamName, [number, number]>;
+  /** Speed profile rows [v_mps, d_m, f0_hz, t0_s, rms_hz] the trace cannot reject. */
+  valley?: number[][];
 }
 
 export interface FlightLabel {
@@ -196,6 +198,8 @@ export interface FlyoverEvent {
   d_m: [number, number];
   harmonics: number;
   trace: [number, number][] | null;
+  /** Speed profile rows [v_mps, d_m, f0_hz, t0_s] from the fit, when there was one. */
+  valley?: number[][] | null;
 }
 
 export interface SilenceWindow {

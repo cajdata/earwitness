@@ -369,6 +369,9 @@ def _build_analyze_aircraft(p: argparse.ArgumentParser) -> None:
     tune.add_argument("--no-terrain", action="store_true", help="flat ground at the ellipsoid")
     tune.add_argument("--top", type=int, default=10, help="flight pairs to refine and report")
     tune.add_argument("--max-candidates", type=int, default=30000)
+    tune.add_argument(
+        "--max-pairs", type=int, default=100000, help="flight-pair hints the prefilter keeps"
+    )
     tune.add_argument("--harmonics", type=int, default=1, help="harmonics to score (default 1)")
     out = p.add_argument_group("output")
     out.add_argument("--out", type=Path, default=None, help="run folder (default runs/<stamp>)")
@@ -435,12 +438,13 @@ def _analyze_aircraft(args: argparse.Namespace) -> int:
             day, cached_bbox, args.cache, args.variant, sub_bbox=region.expand(12000.0)
         )
         flights = prepare_flights(table, TypeTable.load(args.cache))
+        del table  # a continental day is gigabytes in memory
     if not args.no_terrain:
         from earwitness.data.dem import Terrain
 
         terrain = Terrain(args.cache)
     cfg = AircraftPipelineConfig(
-        funnel=FunnelConfig(silence_mode=args.silence),
+        funnel=FunnelConfig(silence_mode=args.silence, max_pairs=args.max_pairs),
         score=ScoreConfig(harmonics=args.harmonics),
         top_pairs=args.top,
         max_candidates=args.max_candidates,

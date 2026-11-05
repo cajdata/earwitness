@@ -31,11 +31,17 @@ def test_fit_recovers_a_noisy_synthetic_flyover():
     assert fit.rms_hz < 0.5
     assert fit.n_points == t.size
     ranges = fit.ranges()
-    for name, truth in (("f0_hz", F0), ("v_mps", V), ("d_m", D), ("t0_s", T0)):
+    heard = T0 + D / SPEED_OF_SOUND
+    for name, truth in (("f0_hz", F0), ("v_mps", V), ("d_m", D), ("t0_s", heard)):
         lo, hi = ranges[name]
         assert lo <= truth <= hi, name
+    # events carry the heard crossing, not the model's closest-approach time
+    assert abs(0.5 * (ranges["t0_s"][0] + ranges["t0_s"][1]) - heard) < 0.5
+    assert abs(fit.heard_t0_s() - heard) < 0.5
     as_dict = fit.to_dict()
     assert as_dict["ranges"]["v_mps"][0] >= 5.0
+    assert all(abs(row[3] - (geo[3] + geo[1] / SPEED_OF_SOUND)) < 1e-9
+               for row, geo in zip(as_dict["valley"], fit.valley, strict=True))  # fmt: skip
     assert all(as_dict["sigma"][k] is not None for k in ("f0_hz", "v_mps", "d_m", "t0_s"))
 
 
@@ -77,7 +83,8 @@ def test_unresolved_parameters_get_wide_ranges():
     assert ranges["d_m"][1] >= 900.0
     # resolved parameters still get at least their floors
     assert ranges["f0_hz"] == [97.0, 103.0]
-    assert ranges["t0_s"] == [97.0, 103.0]
+    heard = 100.0 + 500.0 / SPEED_OF_SOUND  # the crossing, one acoustic delay after t0
+    np.testing.assert_allclose(ranges["t0_s"], [heard - 3.0, heard + 3.0])
 
 
 def test_ranges_are_at_least_as_wide_as_the_acceptance_priors():
@@ -87,3 +94,43 @@ def test_ranges_are_at_least_as_wide_as_the_acceptance_priors():
     assert ranges["d_m"][1] - ranges["d_m"][0] >= D - 1e-9
     assert ranges["t0_s"][1] - ranges["t0_s"][0] >= 6.0 - 1e-9
     assert ranges["f0_hz"][1] - ranges["f0_hz"][0] >= 6.0 - 1e-9
+
+
+def test_profile_keeps_speeds_a_wingless_trace_cannot_reject():
+    # only 8 s around closest approach: the slope fixes v^2 / d, the wings are missing
+    t, f = _trace(noise_hz=0.2, t_lo=T0 - 5.0, t_hi=T0 + 3.0, step=0.1)
+    fit = fit_straight_flyover(t, f)
+    rows = np.asarray(fit.valley)
+    assert rows.shape[0] >= 5
+    assert rows[:, 0].min() <= 50.0
+    assert rows[:, 0].max() >= 100.0
+    # along the valley the distance grows with the speed squared
+    mid = (rows[:, 0] >= 40.0) & (rows[:, 0] <= 200.0)
+    k = rows[mid, 1] / rows[mid, 0] ** 2
+    assert np.std(k) / np.mean(k) < 0.3
+    ranges = fit.ranges()
+    assert ranges["v_mps"][0] <= 50.0
+    assert ranges["v_mps"][1] >= 100.0
+    assert ranges["d_m"][0] <= D
+    assert ranges["d_m"][1] >= 2.0 * D
+    as_dict = fit.to_dict()
+    assert len(as_dict["valley"]) == rows.shape[0]
+    # with both wings the profile rejects all but a narrow band of speeds
+    t, f = _trace(noise_hz=0.2)
+    full = np.asarray(fit_straight_flyover(t, f).valley)
+    assert full[:, 0].max() - full[:, 0].min() < 25.0
+    assert fit_straight_flyover(t, f, profile=False).valley == ()
+
+
+def test_a_distant_flyover_crosses_f0_long_after_closest_approach():
+    # 6 km away the acoustic delay is 17.5 s: the heard crossing, which the funnel subtracts
+    # from a flight's heard closest approach, must carry it
+    rng = np.random.default_rng(5)
+    t = np.arange(T0 - 60.0, T0 + 60.0, 0.25)
+    f = straight_line_doppler(t, F0, 140.0, 6000.0, T0).f + rng.normal(0.0, 0.2, t.size)
+    fit = fit_straight_flyover(t, f)
+    assert abs(fit.t0_s - T0) < 1.0
+    assert abs(fit.heard_t0_s() - (T0 + 6000.0 / SPEED_OF_SOUND)) < 1.5
+    lo, hi = fit.ranges()["t0_s"]
+    assert lo <= T0 + 6000.0 / SPEED_OF_SOUND <= hi
+    assert not lo <= T0 <= hi

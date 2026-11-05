@@ -81,10 +81,12 @@ class Dem:
         la = np.atleast_1d(np.asarray(lat, dtype=float)).ravel()
         lo = np.atleast_1d(np.asarray(lon, dtype=float)).ravel()
         out = np.zeros(la.shape, dtype=float)
-        keys = np.array([tile_id(a, b) for a, b in zip(la, lo, strict=True)])
-        for tile in np.unique(keys):
-            idx = np.flatnonzero(keys == tile)
-            opened = self._open(str(tile))
+        # group points by one-degree tile with integer keys; a string per point was the cost of
+        # this lookup when the aircraft funnel asks for tens of thousands of points at a time
+        keys = (np.floor(la).astype(np.int64) + 90) * 361 + (np.floor(lo).astype(np.int64) + 180)
+        for key in np.unique(keys):
+            idx = np.flatnonzero(keys == key)
+            opened = self._open(tile_id(float(la[idx[0]]), float(lo[idx[0]])))
             if opened is None:
                 continue
             ds, band = opened

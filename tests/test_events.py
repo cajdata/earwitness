@@ -123,3 +123,32 @@ def test_events_from_truth_uses_given_audible_intervals_and_edge_margin():
     assert es.events[0].harmonics == 3
     assert [(s.start_s, s.end_s) for s in es.silence] == [(0.0, 250.0), (700.0, 1150.0)]
     assert ev.merge_spans([(5.0, 2.0), (-10.0, 20.0), (15.0, 30.0)], 25.0) == [(0.0, 25.0)]
+
+
+def test_valley_narrows_ranges_to_a_speed():
+    valley = np.array([[50.0, 250.0, 150.0, 3058.0], [100.0, 1000.0, 130.0, 3067.0],
+                       [200.0, 4000.0, 80.0, 3077.0]])  # fmt: skip
+    e = ev.FlyoverEvent(
+        "e2", ev.Range(3055.0, 3080.0), ev.Range(60.0, 160.0), ev.Range(40.0, 230.0),
+        ev.Range(100.0, 9000.0), valley=valley,
+    )  # fmt: skip
+    r = e.at_speed([100.0, 141.42, 20.0, 400.0])
+    np.testing.assert_allclose(r["d_m"][0][0], 500.0)  # 1000 m at 100 m/s, minus 50%
+    np.testing.assert_allclose(r["d_m"][1][0], 1500.0)
+    np.testing.assert_allclose(0.5 * (r["d_m"][0][1] + r["d_m"][1][1]), 2000.0, rtol=0.01)
+    np.testing.assert_allclose(r["f0_hz"][0][0], 127.0)
+    np.testing.assert_allclose(r["t0_s"][1][0], 3070.0)
+    # beyond the rows the end rows hold, and the envelope clips
+    np.testing.assert_allclose(r["d_m"][0][2], 125.0)
+    np.testing.assert_allclose(r["d_m"][1][3], 6000.0)
+    n = e.narrowed(100.0)
+    np.testing.assert_allclose([n.d_m.lo, n.d_m.hi], [500.0, 1500.0])
+    np.testing.assert_allclose([n.f0_hz.lo, n.f0_hz.hi], [127.0, 133.0])
+    np.testing.assert_allclose([n.t0_s.lo, n.t0_s.hi], [3064.0, 3070.0])
+    assert n.v_mps == e.v_mps
+    # round trip through JSON, and an event without a valley narrows to itself
+    back = ev.FlyoverEvent.from_dict(e.to_dict())
+    np.testing.assert_allclose(back.valley, valley)
+    plain = ev.FlyoverEvent("e1", ev.Range(1, 2), ev.Range(1, 2), ev.Range(1, 2), ev.Range(1, 2))
+    assert plain.narrowed(50.0) is plain
+    assert ev.FlyoverEvent.from_dict(plain.to_dict()).valley is None

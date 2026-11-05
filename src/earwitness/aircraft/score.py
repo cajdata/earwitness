@@ -22,7 +22,7 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
-from earwitness.aircraft.model import Track
+from earwitness.aircraft.model import Track, closest_approach
 from earwitness.audio.events import EventSet, FlyoverEvent
 from earwitness.audio.spectrogram import Spectrogram
 from earwitness.core.physics import SPEED_OF_SOUND, doppler_curve
@@ -247,6 +247,23 @@ def trace_closeness(
     return -float(np.sqrt(np.mean(diff[ok] ** 2)))
 
 
+def at_track_speed(event: FlyoverEvent, track: Track, observer_xyz: FloatArray) -> FlyoverEvent:
+    """The event narrowed to the track's speed at closest approach to the observer.
+
+    A profiled event ties distance, fundamental and closest-approach time to the speed; the
+    ADS-B track supplies the speed, so the sweeps stay narrow. Events without a profile are
+    returned as they are.
+    """
+    if event.valley is None:
+        return event
+    t_cpa, _ = closest_approach(track, observer_xyz)
+    step = 0.5
+    v = float(np.linalg.norm(track.position(t_cpa + step) - track.position(t_cpa - step))) / (
+        2.0 * step
+    )
+    return event.narrowed(v)
+
+
 @dataclass(frozen=True)
 class CandidateScore:
     """Scores of one candidate point."""
@@ -257,6 +274,27 @@ class CandidateScore:
     trace_rms_hz: float = float("nan")
 
 
+def time_sweep_for(
+    e1: FlyoverEvent,
+    cfg: ScoreConfig,
+    time_sweep_s: float | None = None,
+    known_time_tolerance_s: float | None = None,
+) -> float:
+    """Half-width of event 1's time sweep, seconds.
+
+    Known-time mode sweeps the clock tolerance plus the event's closest-approach width, taken
+    from the event as narrowed to the flight's speed: the envelope of a profiled trace can be
+    tens of seconds wide, and sweeping that would let a candidate stretch a clock the user
+    trusts to a second. Otherwise an explicit sweep, or the configured one widened to the
+    event's width.
+    """
+    if known_time_tolerance_s is not None:
+        return known_time_tolerance_s + e1.t0_s.half_width
+    if time_sweep_s is None:
+        return max(cfg.time_sweep_s, e1.t0_s.half_width)
+    return time_sweep_s
+
+
 def score_candidate(
     index: SpectrogramIndex,
     tracks: list[Track],
@@ -265,15 +303,17 @@ def score_candidate(
     t_start_base: float,
     cfg: ScoreConfig,
     time_sweep_s: float | None = None,
+    known_time_tolerance_s: float | None = None,
 ) -> CandidateScore:
     """Locked multi-event score: event 1 sweeps time and f0, later events sweep f0 only."""
-    e1 = events.events[0]
-    sweep = max(cfg.time_sweep_s, e1.t0_s.half_width) if time_sweep_s is None else time_sweep_s
+    e1 = at_track_speed(events.events[0], tracks[0], observer_xyz)
+    sweep = time_sweep_for(e1, cfg, time_sweep_s, known_time_tolerance_s)
     first = score_event(index, tracks[0], observer_xyz, e1, t_start_base, cfg, sweep)
     results = [first]
     t_start = first.t_start
     for event, track in zip(events.events[1:], tracks[1:], strict=True):
-        results.append(score_event(index, track, observer_xyz, event, t_start, cfg, None))
+        narrowed = at_track_speed(event, track, observer_xyz)
+        results.append(score_event(index, track, observer_xyz, narrowed, t_start, cfg, None))
     total = float(sum(r.score for r in results))
     trace_rms = float("nan")
     if e1.trace is not None:

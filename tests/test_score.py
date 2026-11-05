@@ -93,3 +93,42 @@ def test_trace_closeness_ignores_uncovered_points_and_needs_five():
         trace=np.column_stack([t_all[:4], f_all[:4]]),
     )  # fmt: skip
     assert np.isnan(trace_closeness(tr, observer, short, 0.0, 100.0, cfg))
+
+
+def test_at_track_speed_narrows_a_profiled_event():
+    from earwitness.aircraft.score import at_track_speed
+    from earwitness.audio.events import FlyoverEvent, Range
+
+    tr = am.straight_track(70.0, 90.0, 300.0, 300.0, 600.0, 400.0, 800.0, 1.0)
+    valley = np.array([[50.0, 255.0, 112.0, 599.0], [70.0, 500.0, 110.0, 600.0],
+                       [100.0, 1020.0, 107.0, 601.0]])  # fmt: skip
+    event = FlyoverEvent(
+        "e1", Range(590.0, 610.0), Range(100.0, 120.0), Range(40.0, 110.0), Range(100.0, 1600.0),
+        valley=valley,
+    )  # fmt: skip
+    narrowed = at_track_speed(event, tr, ORIGIN)
+    np.testing.assert_allclose([narrowed.f0_hz.lo, narrowed.f0_hz.hi], [107.0, 113.0])
+    np.testing.assert_allclose([narrowed.t0_s.lo, narrowed.t0_s.hi], [597.0, 603.0])
+    np.testing.assert_allclose([narrowed.d_m.lo, narrowed.d_m.hi], [250.0, 750.0])
+    plain = FlyoverEvent(
+        "e1", Range(590.0, 610.0), Range(100.0, 120.0), Range(40.0, 110.0), Range(100.0, 1600.0)
+    )
+    assert at_track_speed(plain, tr, ORIGIN) is plain
+
+
+def test_known_time_sweep_uses_the_narrowed_width_not_the_envelope():
+    from earwitness.aircraft.score import time_sweep_for
+    from earwitness.audio.events import FlyoverEvent, Range
+
+    cfg = ScoreConfig()
+    wide = FlyoverEvent(
+        "e1", Range(700.0, 762.0), Range(80.0, 90.0), Range(30.0, 200.0), Range(100.0, 5000.0)
+    )
+    narrowed = FlyoverEvent(
+        "e1", Range(720.0, 726.0), Range(80.0, 90.0), Range(30.0, 200.0), Range(100.0, 5000.0)
+    )
+    assert time_sweep_for(wide, cfg, known_time_tolerance_s=2.0) == 33.0  # what it must not be
+    assert time_sweep_for(narrowed, cfg, known_time_tolerance_s=2.0) == 5.0
+    assert time_sweep_for(narrowed, cfg) == 3.0  # two-event default, at least cfg.time_sweep_s
+    assert time_sweep_for(wide, cfg) == 31.0
+    assert time_sweep_for(wide, cfg, time_sweep_s=4.0) == 4.0

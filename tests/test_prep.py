@@ -126,3 +126,14 @@ def test_interpolate_track_matches_a_straight_flight():
     t_cpa, slant = am.closest_approach(track)
     assert abs(t_cpa - (T0 + 60.0)) < 0.05
     assert abs(slant - np.hypot(300.0, 450.0)) < 0.5
+
+
+def test_prepare_flights_reads_null_strings_as_empty():
+    rows = [
+        _row("a1", T0 + 2.0 * i, 35.0, -97.0 + 0.001 * i, type_code=None, registration=None,
+             description=None)
+        for i in range(6)
+    ]  # fmt: skip
+    (f,) = prep.prepare_flights(_table(rows))
+    assert (f.icao, f.type_code, f.registration, f.description) == ("a1", "", "", "")
+    assert f.engine_class == "unknown"

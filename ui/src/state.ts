@@ -131,6 +131,7 @@ export function newEvent(t0: number, f0 = 100): FlyoverEvent {
     d_m: [100, 1500],
     harmonics: 3,
     trace: null,
+    valley: null,
   };
 }
 

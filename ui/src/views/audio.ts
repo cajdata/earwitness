@@ -440,7 +440,8 @@ function mountAircraft(container: HTMLElement): () => void {
   function rangesFromState(): Pick<FlyoverEvent, "t0_s" | "f0_hz" | "v_mps" | "d_m"> {
     if (fitResult) return fitResult.ranges;
     return {
-      t0_s: [Math.max(0, params.t0 - 3), params.t0 + 3],
+      // the event's t0 is the heard crossing; the preview's t0 is the closest approach itself
+      t0_s: [Math.max(0, params.t0 + params.d / 343 - 3), params.t0 + params.d / 343 + 3],
       f0_hz: [Math.max(10, params.f0 - 3), params.f0 + 3],
       v_mps: [Math.max(5, params.v * 0.8), params.v * 1.2],
       d_m: [Math.max(20, params.d * 0.5), params.d * 1.5],
@@ -452,11 +453,11 @@ function mountAircraft(container: HTMLElement): () => void {
     const tracePts = trace.length ? trace.map((p) => [Math.round(p[0] * 100) / 100, Math.round(p[1] * 100) / 100] as [number, number]) : null;
     if (selected === null) {
       const ev = newEvent(params.t0, params.f0);
-      Object.assign(ev, ranges, { harmonics, trace: tracePts });
+      Object.assign(ev, ranges, { harmonics, trace: tracePts, valley: fitResult?.valley ?? null });
       state.events.events.push(ev);
       selected = state.events.events.length - 1;
     } else {
-      Object.assign(state.events.events[selected], ranges, { harmonics, trace: tracePts });
+      Object.assign(state.events.events[selected], ranges, { harmonics, trace: tracePts, valley: fitResult?.valley ?? null });
     }
     state.events.events.sort((a, b) => a.t0_s[0] - b.t0_s[0]);
     state.events.events.forEach((ev, i) => (ev.id = `e${i + 1}`));
@@ -550,7 +551,7 @@ function mountAircraft(container: HTMLElement): () => void {
   function selectEvent(i: number): void {
     const ev = state.events.events[i];
     selected = i;
-    params.t0 = (ev.t0_s[0] + ev.t0_s[1]) / 2;
+    params.t0 = (ev.t0_s[0] + ev.t0_s[1]) / 2 - (ev.d_m[0] + ev.d_m[1]) / 2 / 343;
     params.f0 = (ev.f0_hz[0] + ev.f0_hz[1]) / 2;
     params.v = (ev.v_mps[0] + ev.v_mps[1]) / 2;
     params.d = (ev.d_m[0] + ev.d_m[1]) / 2;

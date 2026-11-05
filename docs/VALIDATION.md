@@ -1,7 +1,167 @@
 # Validation
 
-Results of the acceptance checks, synthetic first (M2, M4, M5) and real recordings later (M6).
+Results of the acceptance checks, synthetic first (M2, M4, M5) and real recordings last (M6).
 Every number here comes from a run that can be repeated with the command shown.
+
+## M6: real-world recordings
+
+Acceptance criterion (HANDOFF M6): at least one real aircraft case and one real thunder case
+documented, failures included, with error distance, rank and runtime, from personal recordings
+made under the section 8 protocol and from colsto's published test recording.
+
+How a case runs: the recording is analysed the way a user runs it, with `earwitness analyze` or
+the UI, with no truth in sight. The true site, and the clock reading if one was taken, live in
+a private file under `data/` (gitignored), such as `data/m6/<case>/truth.json` with `lat`,
+`lon` and optionally `start_utc` and `notes`. `scripts/m6_score.py --run <run folder> --truth
+<truth.json>` then scores the run folder: distance of the rank-1 answer from the site, its score
+and margin over the runner-up, the first rank within the tolerance (200 m for aircraft, 5 km for
+thunder, the M4 and M2 acceptance widths), the start-time error, and the rank of the best
+candidate within the tolerance in the final result stage. The row it prints carries no
+coordinates and is pasted here as it is.
+
+Off season, `scripts/m6_storm_watch.py` polls the newest GLM files on AWS and reports where
+lightning is right now, around named points (a livestream camera) or in the busiest half-degree
+cells of a region, as the trigger the protocol describes for recording public livestreams within
+their terms. On 2026-11-04 at 15:09 UTC it saw 213 flashes in the previous 15 minutes between
+105 W and 75 W, most of them over south Florida and a few over northwest Georgia, in 14 s.
+With `--day` it reads the GLM hour cache for a past date instead and prints flashes per hour
+around a point and its busiest half hour, which picks the hour of a webcam archive to pull.
+
+| case | method | rank-1 error (m) | rank within tolerance | score, margin | start error (s) | truth rank in the final stage | counts | runtime (s) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| colsto, metro region, run 1 | aircraft two-event pair | 41252 | none (200 m) | 15.36, margin 0.06 | -32104.5 | 351304 of 362958 (coarse; nearest 55 m) | flights 3549, pairs 130522, candidates 362958, after_silence 362958 | 5290 |
+| colsto, metro region, run 2 (a PC-12, then a King Air 350) | aircraft two-event pair | 173 | 1 (200 m) | 19.88, margin 1.61 | +0.4 | 1 of 355189 (coarse; nearest 55 m) | flights 3549, pairs 131274, candidates 355189, after_silence 355189 | 4364 |
+| personal-1, known time +-5 s, metro box | aircraft single-event known-time | 31603 | 5 (200 m) | 16.03, margin 0.01 | +7.9 | 45 of 1918 (coarse; nearest 93 m) | flights 1859, candidates 1918 | 470 |
+| personal-1, known time +-2 s, metro box, envelope sweep (bug) | aircraft single-event known-time | 31603 | none (200 m) | 16.03, margin 0.01 | +7.9 | 28 of 1192 (coarse; nearest 93 m) | flights 1859, candidates 1192 | 383 |
+| personal-1, known time +-2 s, metro box, corrected sweep | aircraft single-event known-time | 11510 | 5 (200 m) | 16.00, margin 0.02 | -0.5 | 27 of 1192 (coarse; nearest 93 m) | flights 1859, candidates 1192 | 68 |
+| personal-1, known time +-2 s, metro box, silence 880 to 1240 s | aircraft single-event known-time | 11510 | 3 (200 m) | 16.00, margin 0.02 | -0.5 | 23 of 1192 (coarse; nearest 93 m) | flights 1859, candidates 1192, 775 with silence hits | 67 |
+| personal-1, known time +-5 s, state box | aircraft single-event known-time | 79712 | none (200 m) | 16.20, margin 0.20 | +7.0 | 46 of 9213 (coarse; nearest 79 m) | flights 3300, candidates 9213 | 481 |
+| personal-1, two events, metro box, no clock | aircraft two-event pair | 46410 | none (200 m) | 19.75, margin 0.13 | -23826.5 | 4307 of 208887 (coarse; nearest 93 m) | flights 1859, pairs 156212, candidates 208887 | 3268 |
+| personal-1, two events (PC-12 re-traced), known time +-2 s, metro box | aircraft two-event pair | 190 | 1 (200 m) | 17.53, margin 12.32 | +0.5 | 4 of 147 (coarse; nearest 93 m) | flights 1859, pairs 166302, candidates 147 after the clock | 1445 |
+
+Run 2 is the reference case solved: the two flyovers measured with the project's own trace
+and fit tools, searched blind over a 1.8 by 1.0 degree box around the metropolitan area the
+video's last minute reveals, rank the published site first, 173 m off, with a margin of
+1.6 over the runner-up, the clip's start within 0.4 s of the clock the ADS-B tracks imply,
+and the same two aircraft colsto found; 73 min on one core (prefilter 3 min, funnel 18 min,
+scoring 54 min). The start error is measured against a start derived from those tracks
+and the fitted closest-approach time, since the video gives no clock. This is the aircraft
+half of the acceptance criterion; the thunder half is open. Run 1, the same search a day
+earlier in the session, is the failure the bullet on the heard crossing below explains:
+the true pair's cells sat 55 m from the site and scored below zero because the search
+clock started 18 s late. The continental search colsto himself ran is not reproduced, for
+the reasons the bullet on honest ranges gives.
+
+personal-1 is the first personal recording under the section 8 protocol: 21 minutes of
+phone video (Samsung Galaxy S25 Ultra, AAC 48 kHz) recorded on 2026-11-04 with the start
+noted against an NTP clock, metadata stripped before analysis without reading the
+location tag, the truth in a private file read only at scoring. The audit found two
+falling sweeps; the strong one, 690 to 760 s, is a two-blade piston single about 1 km off
+with a fundamental near 85 Hz and five visible harmonics (fit 69 m/s at 1.4 km, rms 0.44 Hz,
+trace without the receding wing, so the profile spans 36 to 240 m/s). The recorder's own
+notes, read afterwards, name that aircraft, a Cessna 172, and its minute. The known-time
+runs use the phone's own clock (the file's end stamp minus its duration, within 2 s of the
+NTP note) and a 1.0 by 0.8 degree box around the metropolitan area; the recorder's general
+area was known to the analyst from earlier conversation, so the test is a search within a
+declared region, as for the reference case. Four runs tell one story: the correct aircraft
+is found and its cell sits 167 m from the site with the clip start within 0.6 s of the
+clock, but it ranks 5th (3rd once a silence window is marked) behind other Cessna 172s
+airborne over the metro at that minute, all within half a point. The clock fixes where
+along each track the flyover happened, not which aircraft it was, and every trainer at
+pattern speed about 1 km from some cell traces a curve within a spectrogram bin of the
+measured one; one flyover of a common type in a training-dense metro is ambiguous by
+construction, which the synthetic M4 cases, with few look-alikes, never showed. The second
+run exposed a bug on the way: in known-time mode the scorer swept the clock tolerance plus
+the event envelope's width, 31 s for this profiled trace, so a 2 s tolerance changed
+nothing and the leader stretched the clock by 6.9 s; the sweep now adds the width at the
+flight's own speed, which also made the run ten times faster.
+
+The two-event search without a clock failed (rank 1 a pair six and a half hours earlier,
+the true pair 4,307th of 208,887). Scoring the site by hand with the true flights showed
+the Cessna's track reproducing its trace to 0.8 Hz rms at 14.6 dB, and the second aircraft,
+a PC-12 that passed at 3.5 km and 108 m/s while slowing from 127, scoring below zero: its
+line had been traced on a 220 to 275 Hz fragment, and the profile's row at that speed put
+the fundamental 10 Hz and the timing 2.6 s off. Re-tracing the same line over 150 to
+320 Hz gave 98.5 m/s at 2.9 km (rms 1.0 Hz) and +1.8 dB at the site, still weak because a
+line visible for 22 s of the scorer's 120 s window cannot score high, and the site's 16.4
+trailed the false leader's 19.8. The pipeline had treated a known time and a second event
+as alternatives; it now lets the clock constrain a two-event search as well, keeping only
+pairs whose implied start sits within the clock tolerance, the timing tolerance and event
+1's width. With that, the re-traced PC-12 and the clock to 2 s, the search keeps 147 of
+319,149 candidates and ranks the site first: 190 m off, margin 12.3 over the runner-up,
+the start within 0.5 s, the two aircraft the notes name, in 24 min (prefilter 12, funnel
+13, scoring 1 s). The state-wide known-time run, the stretch case, loses the site among the
+state's trainers as expected. So one strong flyover of a common type is not enough in a
+trainer-dense metro, and a faint second aircraft is not enough on its own, but the two
+together with the phone's own clock locate a 21 minute phone video to 190 m within a
+metro-sized region.
+
+Status of the inputs and the findings on 2026-11-04:
+
+- colsto's reference recording for video 3 is published as an unlisted YouTube video, "Unknown
+  location - raw audio" (one hour, uploaded 2026-10-31). The app downloads no media, so the audio
+  was fetched by hand with yt-dlp (Opus, 48 kHz, 3600 s) into `data/m6/colsto/`. Video 3 gives
+  the recording day (September 8), a 200 m grid, a 920 s offset between the two flyovers and a
+  search over the whole continental US, and its last minute shows the located point on a map;
+  that point, read from the frames, is the private truth. The two flyovers were traced and
+  fitted with the project's own ridge and fit tools, the UI's route: a loud one at 2137 s
+  (fundamental 113 Hz with a second harmonic, 139 m/s at 6.2 km) and a faint one at 3062 s
+  (144 Hz, 67 m/s at 1.2 km). The fitted gap is 925 s against colsto's 920 +- 5 s.
+- First continental two-event run, the US-wide prior colsto himself used: stopped after
+  2 h 22 min with 2,500 of 100,000 flight-pair hints done. The funnel's exact closest-approach
+  step built a dense points-by-samples distance matrix per hint; with this recording's wide loud
+  tube (a 56 km hint radius, 95 lateral offsets at 200 m) and loitering aircraft that matrix ran
+  to tens of gigabytes, the process swapped (31 to 39 GB committed on a 32 GB machine, a third
+  of a core busy), and hints in flight-index order re-read terrain tiles across the country
+  (30 GB of file reads). The prefilter had also truncated its hint list at the cap, in index
+  order, which the M4 notes had already flagged at the old cap. The funnel was reworked before
+  the rerun: the nearest track sample comes from a k-d tree, only the narrower tube is laid per
+  hint and its cells are checked against the other flight's exact closest approach, hints run
+  in spatial order, the 1 s track cache is bounded, and `--max-pairs` sets the hint cap.
+- Why the funnel then found nothing at the truth: the faint flyover's trace covers 25 s
+  around closest approach and none of the curve's wings, so its straight-flyover fit is
+  degenerate along d ~ v^2 (the slope at closest approach fixes v^2 / d and little else).
+  Holding the speed at anything from 60 to 230 m/s refits the trace within 0.1 Hz rms of
+  the best, while the fit's Jacobian reported a one-sigma speed error of 2.7 m/s. The fit
+  said 67 m/s at 1.2 km; the aircraft, found afterwards in the ADS-B day by the 925 s gap,
+  flew 104 m/s at 3.5 km, and ranges built from k sigma and the 30% and 50% floors excluded
+  it (colsto, measuring the same curve: "pretty sure it wasn't going 70"). The fit now
+  profiles the speed and keeps every held speed within 0.5 Hz rms of the best with its own
+  distance, fundamental and closest-approach time (`DopplerFit.valley`, an optional
+  `valley` per event in events.json); the funnel lays each tube and checks each cell at
+  the flight's own speed and requires both events to imply the same recording start, and
+  the scorer narrows f0 and t0 per candidate the same way. The loud flyover's 40 s trace
+  profiles to 90 to 300 m/s; its fit, 139 m/s at 6.2 km, matched its aircraft (137 m/s at
+  6.1 km) by the luck of a longer trace. With the profiled events, a check that ran every
+  hint meeting within 61 km of the site (74,666 from an 80 km box) kept 21 cells within
+  300 m of it, the nearest 89 m away, all from the true pair, among 246,896 candidates.
+- The second cause, found by scoring the true site by hand with the true flights: the fit
+  tool reported the model's closest-approach time, when the aircraft was nearest, while
+  events, the funnel, the synthetic harness and the handoff's timing pair use the heard
+  crossing, one acoustic delay later. Every event measured with the fit tool therefore
+  started the search clock late by d / c: 1.5 s for the 500 m flyover of the M5 acceptance
+  case, invisible inside the scorer's 3 s sweep, and 18 s for this recording's 6 km flyover,
+  which put the modeled curve 18 Hz off the ridge (model-to-trace rms 0.45 Hz at the right
+  start, 17.9 Hz at the late one). The fit's exported ranges and valley now carry the heard
+  crossing, with a test on a 6 km flyover, and the UI's manual sliders convert the same way.
+  At the true site with the corrected start, the true pair scores 19.5 (11.6 dB and
+  7.9 dB) against the 15.4 that won run 1; the faint event's profile row at the flight's
+  speed puts its fundamental at 126 to 132 Hz, and the audio's best answer there is 125.5,
+  so the profile helps that event too (its original 141 to 148 Hz range scores below zero).
+- The price of honest ranges: with speed envelopes of 62 to 309 and 29 to 309 m/s the
+  prefilter on a 200 km box alone returns 919 million sample pairs and 282,091 hints in
+  514 s, so a continental two-event search for this recording is beyond the v0.1 funnel on
+  one machine (millions of hints at 5 to 20 ms each, then millions of candidates at 10 ms
+  each). The reference case therefore runs with a region prior, the city-sized one colsto
+  himself calls the typical case and which his video reveals in its last minute; the
+  continental search stays on the list with the two changes it needs, a vectorized
+  candidate scorer and a prefilter that indexes samples by the recording start they imply
+  at their own speed.
+- Personal recordings: none yet. An aircraft case can be recorded any day near a
+  general-aviation airport (20 minutes of WAV at 48 kHz, start time noted against an NTP clock
+  to a second); a thunder case needs a storm, or a livestream while the storm watch shows one.
+- ffmpeg 9.0 is installed on the development machine, so phone and camera files (AAC in MP4 or
+  M4A) and the reference recording's Opus decode; without it only WAV, FLAC and OGG do.
 
 ## M5: desktop UI, from a file to a heat map without the CLI
 

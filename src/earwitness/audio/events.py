@@ -19,17 +19,24 @@ the moment the received frequency crosses `f0`.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 
 import numpy as np
-from numpy.typing import NDArray
+from numpy.typing import ArrayLike, NDArray
 
 from earwitness.project import parse_utc, utc_iso
 
 SCHEMA = "earwitness.events/1"
 FloatArray = NDArray[np.float64]
+
+
+VALLEY_HALF_F0_HZ = 3.0
+VALLEY_HALF_T0_S = 3.0
+VALLEY_HALF_D_M = 100.0
+VALLEY_HALF_D_FRACTION = 0.5
+"""Half-widths around a valley row at a given speed: the floors the fit's ranges use."""
 
 
 @dataclass(frozen=True)
@@ -86,6 +93,10 @@ class FlyoverEvent:
     harmonics: int = 1
     trace: FloatArray | None = None
     """Optional traced curve, shape (n, 2): [t_s, f_hz]."""
+    valley: FloatArray | None = None
+    """Optional speed profile, shape (n, 4): [v_mps, d_m, f0_hz, t0_s] rows the trace cannot
+    tell apart (`earwitness.aircraft.fit.profile_speed`). The funnel and the scorer narrow the
+    distance, fundamental and closest-approach time to a flight's speed with it."""
 
     def to_dict(self) -> dict[str, object]:
         """JSON form."""
@@ -97,6 +108,7 @@ class FlyoverEvent:
             "d_m": self.d_m.as_list(),
             "harmonics": self.harmonics,
             "trace": None if self.trace is None else self.trace.tolist(),
+            "valley": None if self.valley is None else self.valley.tolist(),
         }
 
     @classmethod
@@ -108,6 +120,8 @@ class FlyoverEvent:
             return Range(float(lo), float(hi))
 
         trace = d.get("trace")
+        valley = d.get("valley")
+        rows = None if not valley else np.asarray(valley, dtype=float)[:, :4]
         return cls(
             id=str(d["id"]),
             t0_s=rng("t0_s"),
@@ -116,6 +130,54 @@ class FlyoverEvent:
             d_m=rng("d_m"),
             harmonics=int(d.get("harmonics", 1) or 1),
             trace=None if trace is None else np.asarray(trace, dtype=float).reshape(-1, 2),
+            valley=rows,
+        )
+
+    def at_speed(self, v: ArrayLike) -> dict[str, tuple[FloatArray, FloatArray]]:
+        """(lo, hi) arrays of d_m, f0_hz and t0_s for aircraft speeds `v`.
+
+        With a valley, the trace's own distance, fundamental and closest-approach time at each
+        speed, interpolated in log speed (distance log-log, since it grows as the speed squared
+        along the valley) and held at the end rows beyond it, each widened by the floors the
+        fit's ranges use and kept inside those ranges. Without one, the ranges themselves.
+        """
+        v = np.atleast_1d(np.asarray(v, dtype=float))
+
+        def const(r: Range) -> tuple[FloatArray, FloatArray]:
+            return np.full(v.shape, r.lo), np.full(v.shape, r.hi)
+
+        if self.valley is None or self.valley.shape[0] == 0:
+            return {"d_m": const(self.d_m), "f0_hz": const(self.f0_hz), "t0_s": const(self.t0_s)}
+        rows = self.valley[np.argsort(self.valley[:, 0])]
+        lv = np.log(np.clip(v, 1e-3, None))
+        lrows = np.log(np.clip(rows[:, 0], 1e-3, None))
+        d = np.exp(np.interp(lv, lrows, np.log(np.clip(rows[:, 1], 1e-3, None))))
+        f0 = np.interp(lv, lrows, rows[:, 2])
+        t0 = np.interp(lv, lrows, rows[:, 3])
+        d_half = np.maximum(VALLEY_HALF_D_M, VALLEY_HALF_D_FRACTION * d)
+
+        def band(
+            mid: FloatArray, half: FloatArray | float, r: Range
+        ) -> tuple[FloatArray, FloatArray]:
+            lo = np.maximum(mid - half, r.lo)
+            return lo, np.maximum(np.minimum(mid + half, r.hi), lo)
+
+        return {
+            "d_m": band(d, d_half, self.d_m),
+            "f0_hz": band(f0, VALLEY_HALF_F0_HZ, self.f0_hz),
+            "t0_s": band(t0, VALLEY_HALF_T0_S, self.t0_s),
+        }
+
+    def narrowed(self, v: float) -> FlyoverEvent:
+        """This event with d_m, f0_hz and t0_s narrowed to speed `v` (see `at_speed`)."""
+        if self.valley is None or self.valley.shape[0] == 0:
+            return self
+        r = self.at_speed(v)
+        return replace(
+            self,
+            d_m=Range(float(r["d_m"][0][0]), float(r["d_m"][1][0])),
+            f0_hz=Range(float(r["f0_hz"][0][0]), float(r["f0_hz"][1][0])),
+            t0_s=Range(float(r["t0_s"][0][0]), float(r["t0_s"][1][0])),
         )
 
 

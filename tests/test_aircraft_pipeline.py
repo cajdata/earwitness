@@ -162,3 +162,19 @@ def test_cli_analyze_aircraft_with_tracks_file(tmp_path, capsys):
     assert "run folder" in capsys.readouterr().out
     summary = json.loads((run / "summary.json").read_text())
     assert distance_to(summary, LAT, LON)[0] < 200.0
+
+
+def test_two_event_pipeline_honours_a_known_time(tmp_path):
+    case, truth, flights = _case(tmp_path)
+    events = events_from_truth(truth)
+    events.known_time = START
+    events.known_time_tolerance_s = 1.0
+    priors = AircraftPriors(
+        START - timedelta(minutes=10), START + timedelta(minutes=10), BBox.around(LAT, LON, 15000.0)
+    )
+    cfg = AircraftPipelineConfig(use_terrain=False, top_pairs=5, heatmap_pairs=1)
+    run = tmp_path / "run"
+    summary = analyze_aircraft(case / "recording.wav", events, flights, priors, run, cfg)
+    assert summary["top"][0]["rank"] == 1
+    assert distance_to(summary, LAT, LON)[0] < 200.0
+    assert "known time with two events" in (run / "run.log").read_text(encoding="utf-8")

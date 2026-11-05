@@ -25,7 +25,7 @@ to a heat map for both; no real recording has been validated yet (that is M6).
 | M3 | ADS-B data: adsb.lol loader, aircraft types, terrain | done |
 | M4 | Aircraft Doppler pipeline: events, funnel, scoring, outputs | done, see [docs/VALIDATION.md](docs/VALIDATION.md) |
 | M5 | Desktop UI: local API, Vite front end, native window, audit mode | done, see [docs/VALIDATION.md](docs/VALIDATION.md) |
-| M6 | Real-world validation | next |
+| M6 | Real-world validation | in progress, see [docs/VALIDATION.md](docs/VALIDATION.md) |
 | M7 | v0.1.0 release and site | planned |
 
 ## Responsible use

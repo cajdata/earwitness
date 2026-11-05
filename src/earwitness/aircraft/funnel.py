@@ -15,6 +15,8 @@ sorted-array intersection.
 
 from __future__ import annotations
 
+import itertools
+from collections import OrderedDict
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -31,6 +33,10 @@ from earwitness.core.physics import SPEED_OF_SOUND
 FloatArray = NDArray[np.float64]
 IntArray = NDArray[np.int64]
 COLS = 1 << 24
+MAX_CACHED_TRACKS = 4096
+"""1 s tracks kept in memory; a continental day touches tens of thousands of flights."""
+PREFILTER_CHUNK = 20000
+"""Event-2 samples per ball query in the pair prefilter; bounds the hit lists in memory."""
 
 
 @dataclass(frozen=True)
@@ -96,15 +102,24 @@ def cpa_to_points(
 
     Uses the squared distance at the nearest sample and its neighbors with a parabolic fit, which
     is exact for straight uniform motion and within centimeters for turning aircraft at 1 s steps.
+    The nearest sample comes from a k-d tree over the track, so memory grows with the number of
+    points rather than points times samples: the dense distance matrix of a loitering track
+    against a wide tube ran to tens of gigabytes at continental scale.
     """
-    pts = np.atleast_2d(points_xyz)
-    d2 = ((pts[:, None, :] - track_xyz[None, :, :]) ** 2).sum(axis=2)
-    i = np.argmin(d2, axis=1)
+    pts = np.atleast_2d(np.asarray(points_xyz, dtype=float))
     n = track_xyz.shape[0]
+    if n == 0:
+        raise ValueError("cpa_to_points needs at least one track sample")
+    if pts.shape[0] == 0:
+        return np.zeros(0), np.zeros(0)
+    i = np.asarray(cKDTree(track_xyz).query(pts, k=1)[1], dtype=np.int64)
     im = np.clip(i - 1, 0, n - 1)
     ip = np.clip(i + 1, 0, n - 1)
-    rows = np.arange(pts.shape[0])
-    dm, d0, dp = d2[rows, im], d2[rows, i], d2[rows, ip]
+
+    def sqdist(j: IntArray) -> FloatArray:
+        return ((pts - track_xyz[j]) ** 2).sum(axis=1)
+
+    dm, d0, dp = sqdist(im), sqdist(i), sqdist(ip)
     denom = dm - 2.0 * d0 + dp
     # the fit needs the nearest sample's true neighbors, not the far side of a gap left when
     # the track was cut down to the segment near a hint
@@ -132,7 +147,7 @@ class FlightSet:
     sample_speed: FloatArray
     sample_h: FloatArray
     """Aircraft height above the ellipsoid at each indexed sample."""
-    _tracks: dict[int, Track] = field(default_factory=dict, repr=False)
+    _tracks: OrderedDict[int, Track] = field(default_factory=OrderedDict, repr=False)
     _tree: cKDTree | None = field(default=None, repr=False)
 
     @classmethod
@@ -184,9 +199,13 @@ class FlightSet:
         return len(self.flights)
 
     def track(self, idx: int) -> Track:
-        """ECEF track at 1 s for a flight, cached."""
-        if idx not in self._tracks:
+        """ECEF track at 1 s for a flight, from a bounded most-recently-used cache."""
+        if idx in self._tracks:
+            self._tracks.move_to_end(idx)
+        else:
             self._tracks[idx] = self.flights[idx].track_ecef(1.0)
+            while len(self._tracks) > MAX_CACHED_TRACKS:
+                self._tracks.popitem(last=False)
         return self._tracks[idx]
 
     def tree(self) -> cKDTree:
@@ -219,6 +238,10 @@ class TubeCells:
     heard: FloatArray
     """Heard closest-approach time, Unix seconds."""
     slant: FloatArray
+    height: FloatArray
+    """Ground height above the ellipsoid at the cell center, m."""
+    speed: FloatArray
+    """Aircraft ground speed at closest approach, m/s."""
 
 
 def tube_cells(
@@ -241,10 +264,8 @@ def tube_cells(
     fl = fs.flights[flight_idx]
     track = fs.track(flight_idx)
     d_hi = min(event.d_m.hi, cfg.max_distance_m)
-    d_lo = event.d_m.lo
-    empty = TubeCells(
-        flight_idx, np.zeros(0, np.int64), np.zeros(0), np.zeros(0), np.zeros(0), np.zeros(0)
-    )
+    z = np.zeros(0)
+    empty = TubeCells(flight_idx, np.zeros(0, np.int64), z, z, z, z, z, z)
     if d_hi <= 0.0:
         return empty
     t = track.t
@@ -290,9 +311,12 @@ def tube_cells(
         ground_height(lat[idx], lon[idx]) if ground_height is not None else np.zeros(idx.size)
     )
     dh = np.maximum(h_ac[idx] - h_ground, 0.0)
-    x_hi = np.sqrt(np.maximum(d_hi**2 - dh**2, 0.0))
-    x_lo = np.sqrt(np.maximum(d_lo**2 - dh**2, 0.0))
-    offsets = np.arange(0.0, d_hi + cfg.grid_spacing_m, cfg.grid_spacing_m)
+    # the distance band at each sample's own speed: a profiled event ties d to v
+    band = event.at_speed(speed[idx])["d_m"]
+    d_lo_s, d_hi_s = band[0], np.minimum(band[1], cfg.max_distance_m)
+    x_hi = np.sqrt(np.maximum(d_hi_s**2 - dh**2, 0.0))
+    x_lo = np.sqrt(np.maximum(d_lo_s**2 - dh**2, 0.0))
+    offsets = np.arange(0.0, float(x_hi.max()) + 2.0 * cfg.grid_spacing_m, cfg.grid_spacing_m)
     offsets = np.concatenate([-offsets[::-1], offsets[1:]])
     xo = offsets[None, :]
     valid = (np.abs(xo) >= x_lo[:, None] - cfg.grid_spacing_m) & (
@@ -315,9 +339,14 @@ def tube_cells(
     cg = ground_height(clat, clon) if ground_height is not None else np.zeros(ids.size)
     pts = geodesy.geodetic_to_ecef(clat, clon, cg)
     t_cpa, slant = cpa_to_points(track.enu[segment], track.t[segment], pts)
-    ok = (slant >= d_lo) & (slant <= d_hi)
+    v_cpa = np.interp(t_cpa, fl.time_unix, fl.gs_mps)
+    band = event.at_speed(v_cpa)["d_m"]
+    ok = (slant >= band[0]) & (slant <= np.minimum(band[1], cfg.max_distance_m))
+    ok &= (v_cpa >= event.v_mps.lo) & (v_cpa <= event.v_mps.hi)
     heard = t_cpa + slant / cfg.speed_of_sound
-    return TubeCells(flight_idx, ids[ok], clat[ok], clon[ok], heard[ok], slant[ok])
+    return TubeCells(
+        flight_idx, ids[ok], clat[ok], clon[ok], heard[ok], slant[ok], cg[ok], v_cpa[ok]
+    )
 
 
 class GroundHeight:
@@ -339,11 +368,47 @@ class PairHint:
     f1: int
     f2: int
     xy: FloatArray
+    v1: float = float("nan")
+    """Ground speed of flight 1 at the sample that met, m/s; NaN when unknown."""
+    v2: float = float("nan")
+
+
+@dataclass
+class PairHints:
+    """Pair hints as arrays: flight indices and meeting places, one row per hint."""
+
+    f1: IntArray
+    f2: IntArray
+    xy: FloatArray
+    """(n, 2) meeting places in the flight set's tangent plane."""
+    speed: FloatArray = field(default_factory=lambda: np.zeros((0, 2)))
+    """(n, 2) ground speeds of the two flights at the samples that met, m/s."""
+    raw_hits: int = 0
+    """Sample pairs the ball queries returned before deduplication."""
+
+    def __len__(self) -> int:
+        return int(self.f1.shape[0])
+
+    def __getitem__(self, i: int) -> PairHint:
+        if self.speed.shape[0] == len(self):
+            v1, v2 = float(self.speed[i, 0]), float(self.speed[i, 1])
+        else:
+            v1 = v2 = float("nan")
+        return PairHint(int(self.f1[i]), int(self.f2[i]), self.xy[i], v1, v2)
+
+    def __iter__(self):  # noqa: ANN204
+        for i in range(len(self)):
+            yield self[i]
+
+    @staticmethod
+    def empty() -> PairHints:
+        """No hints."""
+        return PairHints(np.zeros(0, np.int64), np.zeros(0, np.int64), np.zeros((0, 2)))
 
 
 def pair_prefilter(
     fs: FlightSet, e1: FlyoverEvent, e2: FlyoverEvent, gap: Range, cfg: FunnelConfig
-) -> list[PairHint]:
+) -> PairHints:
     """Flight pairs that could produce two flyovers `gap` apart, and where they meet.
 
     Event-1 samples are indexed in (x, y, scaled time) with time shifted by the gap, so a ball
@@ -351,12 +416,14 @@ def pair_prefilter(
     differ by the gap within the allowed slack. One hint is kept per flight pair per meeting
     place (coarse cells twice the reach wide): two aircraft working the same airport meet again
     and again, and every meeting place has to be searched, not just the first one found. The
-    list stops at `cfg.max_pairs` hints, in index order, and the caller reports that.
+    queries run in chunks and the hits are reduced with array operations, since a continental
+    day returns hundreds of millions of sample pairs. The list stops at `cfg.max_pairs` hints,
+    in index order, and the caller reports that.
     """
     m1 = speed_mask(fs, e1)
     m2 = speed_mask(fs, e2)
     if not m1.any() or not m2.any():
-        return []
+        return PairHints.empty()
     reach = pair_reach(e1, e2, cfg)
     v_min = max(min(e1.v_mps.lo, e2.v_mps.lo), cfg.min_speed_mps)
     slack = cfg.timing_tolerance_s + gap.half_width + reach / v_min + cfg.index_step_s
@@ -367,23 +434,45 @@ def pair_prefilter(
     pts1 = np.column_stack([fs.sample_xy[i1], (fs.sample_t[i1] + gap.mid) * scale])
     pts2 = np.column_stack([fs.sample_xy[i2], fs.sample_t[i2] * scale])
     tree = cKDTree(pts1)
-    hits = tree.query_ball_point(pts2, reach * np.sqrt(2.0))
-    pairs: dict[tuple[int, int, int, int], FloatArray] = {}
-    for q, lst in enumerate(hits):
-        if not lst:
+    keys: list[IntArray] = []
+    mids: list[FloatArray] = []
+    speeds: list[FloatArray] = []
+    raw = 0
+    for lo in range(0, pts2.shape[0], PREFILTER_CHUNK):
+        hits = tree.query_ball_point(pts2[lo : lo + PREFILTER_CHUNK], reach * np.sqrt(2.0))
+        counts = np.fromiter((len(h) for h in hits), dtype=np.int64, count=len(hits))
+        total = int(counts.sum())
+        raw += total
+        if total == 0:
             continue
-        f2 = int(fs.sample_flight[i2[q]])
-        for h in lst:
-            f1 = int(fs.sample_flight[i1[h]])
-            if f1 == f2:
-                continue
-            mid = 0.5 * (fs.sample_xy[i1[h]] + fs.sample_xy[i2[q]])
-            key = (f1, f2, int(np.floor(mid[0] / coarse)), int(np.floor(mid[1] / coarse)))
-            if key not in pairs:
-                pairs[key] = mid
-                if len(pairs) >= cfg.max_pairs:
-                    return [PairHint(k[0], k[1], xy) for k, xy in pairs.items()]
-    return [PairHint(k[0], k[1], xy) for k, xy in pairs.items()]
+        q = np.repeat(np.arange(lo, lo + len(hits)), counts)
+        h = np.fromiter(itertools.chain.from_iterable(hits), dtype=np.int64, count=total)
+        f1 = fs.sample_flight[i1[h]]
+        f2 = fs.sample_flight[i2[q]]
+        keep = f1 != f2
+        if not keep.any():
+            continue
+        q, h, f1, f2 = q[keep], h[keep], f1[keep], f2[keep]
+        mid = 0.5 * (fs.sample_xy[i1[h]] + fs.sample_xy[i2[q]])
+        key = np.column_stack([f1, f2, np.floor(mid / coarse).astype(np.int64)])
+        _, first = np.unique(key, axis=0, return_index=True)
+        first.sort()
+        keys.append(key[first])
+        mids.append(mid[first])
+        speeds.append(np.column_stack([fs.sample_speed[i1[h]], fs.sample_speed[i2[q]]])[first])
+    if not keys:
+        return PairHints(
+            np.zeros(0, np.int64), np.zeros(0, np.int64), np.zeros((0, 2)), raw_hits=raw
+        )
+    key = np.concatenate(keys)
+    mid = np.concatenate(mids)
+    speed = np.concatenate(speeds)
+    _, first = np.unique(key, axis=0, return_index=True)
+    first.sort()
+    first = first[: cfg.max_pairs]
+    return PairHints(
+        key[first, 0].copy(), key[first, 1].copy(), mid[first].copy(), speed[first].copy(), raw
+    )
 
 
 def pair_reach(e1: FlyoverEvent, e2: FlyoverEvent, cfg: FunnelConfig) -> float:
@@ -465,6 +554,117 @@ def timing_join(
     )
 
 
+def flight_cpa_near(
+    fs: FlightSet,
+    flight_idx: int,
+    lat: FloatArray,
+    lon: FloatArray,
+    height: FloatArray,
+    event: FlyoverEvent,
+    cfg: FunnelConfig,
+    near_xy: FloatArray,
+    near_radius_m: float,
+) -> tuple[FloatArray, FloatArray, FloatArray]:
+    """Closest approach of one flight to ground points near a hint: time, slant, speed then.
+
+    The search runs on the track segment within the hint radius plus two distance ranges, the
+    segment `tube_cells` uses, so a leg that passes the same place twice answers with the pass
+    near the hint.
+    """
+    fl = fs.flights[flight_idx]
+    track = fs.track(flight_idx)
+    d_hi = min(event.d_m.hi, cfg.max_distance_m)
+    t = track.t
+    xy = fs.xy(np.interp(t, fl.time_unix, fl.lat), np.interp(t, fl.time_unix, fl.lon))
+    dist = np.hypot(xy[:, 0] - near_xy[0], xy[:, 1] - near_xy[1])
+    segment = dist <= near_radius_m + 2.0 * d_hi + 2.0 * cfg.grid_spacing_m
+    if segment.sum() < 3:
+        segment[:] = True
+    pts = geodesy.geodetic_to_ecef(lat, lon, height)
+    t_cpa, slant = cpa_to_points(track.enu[segment], t[segment], pts)
+    speed = np.interp(t_cpa, fl.time_unix, fl.gs_mps)
+    return t_cpa, slant, speed
+
+
+def band_width(event: FlyoverEvent, v: float, cap: float) -> float:
+    """Width of the event's distance band at speed `v`, its whole range when `v` is unknown."""
+    if not np.isfinite(v):
+        return min(event.d_m.hi, cap) - event.d_m.lo
+    lo, hi = event.at_speed(v)["d_m"]
+    return float(min(hi[0], cap) - lo[0])
+
+
+def pair_cells(
+    fs: FlightSet,
+    hint: PairHint,
+    e1: FlyoverEvent,
+    e2: FlyoverEvent,
+    lattice: Lattice,
+    cfg: FunnelConfig,
+    ground_height: GroundHeight | None,
+    radius: float,
+) -> Candidates:
+    """Cells near a hint in both tubes where the two events imply the same recording start.
+
+    Only the narrower tube, the event whose distance band is narrower at the speed its flight
+    had where the two met, is laid on the lattice. Its
+    cells are then checked against the other flight's exact closest approach: slant distance and
+    speed inside that event's ranges at the flight's speed, then the timing. Each event implies
+    a recording start, its heard closest approach minus its closest-approach time at that
+    speed; the two must agree within their widths and the timing tolerance. The wide tube of a
+    distant, fast aircraft is never laid; laying it was the funnel's memory and time at
+    continental scale.
+    """
+    d1 = min(e1.d_m.hi, cfg.max_distance_m)
+    d2 = min(e2.d_m.hi, cfg.max_distance_m)
+    first_narrow = band_width(e1, hint.v1, d1) <= band_width(e2, hint.v2, d2)
+    f_n, e_n, f_w, e_w = (hint.f1, e1, hint.f2, e2) if first_narrow else (hint.f2, e2, hint.f1, e1)
+    tube = tube_cells(fs, f_n, e_n, lattice, cfg, ground_height, hint.xy, radius)
+    if tube.ids.size == 0:
+        return Candidates.empty()
+    t_cpa, slant, speed = flight_cpa_near(
+        fs, f_w, tube.lat, tube.lon, tube.height, e_w, cfg, hint.xy, radius
+    )
+    band = e_w.at_speed(speed)["d_m"]
+    ok = (slant >= band[0]) & (slant <= np.minimum(band[1], d2 if first_narrow else d1))
+    ok &= (speed >= e_w.v_mps.lo) & (speed <= e_w.v_mps.hi)
+    heard_w = t_cpa + slant / cfg.speed_of_sound
+    t0_n = e_n.at_speed(tube.speed)["t0_s"]
+    t0_w = e_w.at_speed(speed)["t0_s"]
+    start_n = tube.heard - 0.5 * (t0_n[0] + t0_n[1])
+    start_w = heard_w - 0.5 * (t0_w[0] + t0_w[1])
+    slack = 0.5 * (t0_n[1] - t0_n[0]) + 0.5 * (t0_w[1] - t0_w[0]) + cfg.timing_tolerance_s
+    ok &= np.abs(start_w - start_n) <= slack
+    if not ok.any():
+        return Candidates.empty()
+    heard1, heard2 = (tube.heard, heard_w) if first_narrow else (heard_w, tube.heard)
+    slant1, slant2 = (tube.slant, slant) if first_narrow else (slant, tube.slant)
+    start1 = start_n if first_narrow else start_w
+    n = int(ok.sum())
+    return Candidates(
+        cell=tube.ids[ok],
+        lat=tube.lat[ok],
+        lon=tube.lon[ok],
+        f1=np.full(n, hint.f1, dtype=np.int64),
+        f2=np.full(n, hint.f2, dtype=np.int64),
+        heard1=heard1[ok],
+        heard2=heard2[ok],
+        slant1=slant1[ok],
+        slant2=slant2[ok],
+        t_start=start1[ok],
+    )
+
+
+def spatial_order(xy: FloatArray, block_m: float = 50000.0) -> IntArray:
+    """Row-major order of points over blocks `block_m` wide, so neighbors come one after another."""
+    xy = np.atleast_2d(np.asarray(xy, dtype=float))
+    if xy.shape[0] == 0:
+        return np.zeros(0, np.int64)
+    bx = np.floor(xy[:, 0] / block_m)
+    by = np.floor(xy[:, 1] / block_m)
+    return np.lexsort((xy[:, 0], bx, by)).astype(np.int64)
+
+
 def two_event_candidates(
     fs: FlightSet,
     e1: FlyoverEvent,
@@ -475,23 +675,21 @@ def two_event_candidates(
     ground_height: GroundHeight | None = None,
     progress: object | None = None,
 ) -> tuple[Candidates, int]:
-    """Speed gate, pair prefilter, distance tubes and timing join. Returns (candidates, hints).
+    """Speed gate, pair prefilter, narrow tube and exact check. Returns (candidates, hints).
 
-    Each hint's tubes are restricted to the track segments near its meeting place (three times
+    Each hint's work is restricted to the track segments near its meeting place (three times
     the reach, which covers the far corner of a hint's coarse cell), so one pair of aircraft that
-    meet in several places costs one tube pass per place rather than a region-wide tube.
+    meet in several places costs one pass per place rather than a region-wide tube. Hints run in
+    spatial order so that consecutive hints share terrain tiles and cached tracks.
     """
     hints = pair_prefilter(fs, e1, e2, gap, cfg)
+    if progress is not None:
+        progress(f"prefilter: {hints.raw_hits} sample pairs, {len(hints)} pair hints")
     radius = 3.0 * pair_reach(e1, e2, cfg)
     parts: list[Candidates] = []
-    for k, hint in enumerate(hints, start=1):
-        tube1 = tube_cells(fs, hint.f1, e1, lattice, cfg, ground_height, hint.xy, radius)
-        if tube1.ids.size == 0:
-            continue
-        tube2 = tube_cells(fs, hint.f2, e2, lattice, cfg, ground_height, hint.xy, radius)
-        if tube2.ids.size == 0:
-            continue
-        joined = timing_join(tube1, tube2, e1, gap, cfg)
+    order = spatial_order(hints.xy)
+    for k, j in enumerate(order.tolist(), start=1):
+        joined = pair_cells(fs, hints[j], e1, e2, lattice, cfg, ground_height, radius)
         if len(joined):
             parts.append(joined)
         if progress is not None and k % 500 == 0:
@@ -522,7 +720,10 @@ def single_event_candidates(
         tube = tube_cells(fs, int(f), event, lattice, cfg, ground_height, t_window=(lo, hi))
         if tube.ids.size == 0:
             continue
-        ok = np.abs(tube.heard - (t_known + event.t0_s.mid)) <= event.t0_s.half_width + tolerance_s
+        t0 = event.at_speed(tube.speed)["t0_s"]
+        ok = np.abs(tube.heard - (t_known + 0.5 * (t0[0] + t0[1]))) <= (
+            0.5 * (t0[1] - t0[0]) + tolerance_s
+        )
         if not ok.any():
             continue
         n = int(ok.sum())

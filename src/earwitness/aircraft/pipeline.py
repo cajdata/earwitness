@@ -40,7 +40,7 @@ from earwitness.aircraft.score import (
     score_candidate,
 )
 from earwitness.audio.decode import read_audio, resample
-from earwitness.audio.events import EventSet
+from earwitness.audio.events import VALLEY_HALF_T0_S, EventSet
 from earwitness.audio.spectrogram import ridge, spectrogram
 from earwitness.core import geodesy
 from earwitness.core.grid import BBox, local_grid
@@ -94,7 +94,7 @@ def _score_rows(
     height: FloatArray,
     events: EventSet,
     cfg: AircraftPipelineConfig,
-    time_sweep_s: float | None,
+    known_time_tolerance_s: float | None,
 ) -> list[CandidateScore]:
     xyz = geodesy.geodetic_to_ecef(lat, lon, height)
     out: list[CandidateScore] = []
@@ -104,7 +104,13 @@ def _score_rows(
             tracks.append(fs.track(int(cand.f2[i])))
         out.append(
             score_candidate(
-                index, tracks, xyz[i], events, float(cand.t_start[i]), cfg.score, time_sweep_s
+                index,
+                tracks,
+                xyz[i],
+                events,
+                float(cand.t_start[i]),
+                cfg.score,
+                known_time_tolerance_s=known_time_tolerance_s,
             )
         )
     return out
@@ -122,7 +128,7 @@ def _refine_around(
     ground: GroundHeight,
     events: EventSet,
     cfg: AircraftPipelineConfig,
-    time_sweep_s: float | None,
+    known_time_tolerance_s: float | None,
     penalty_db: float,
 ) -> tuple[FloatArray, FloatArray, list[CandidateScore], FloatArray]:
     """Score candidate `i`'s flights on a local grid around a point.
@@ -137,7 +143,9 @@ def _refine_around(
         slant1=np.full(rlat.size, cand.slant1[i]), slant2=np.full(rlat.size, cand.slant2[i]),
         t_start=np.full(rlat.size, cand.t_start[i]),
     )  # fmt: skip
-    rs = _score_rows(index, fs, sub, rlat, rlon, ground(rlat, rlon), events, cfg, time_sweep_s)
+    rs = _score_rows(
+        index, fs, sub, rlat, rlon, ground(rlat, rlon), events, cfg, known_time_tolerance_s
+    )
     return rlat, rlon, rs, np.array([s.total for s in rs]) - penalty_db
 
 
@@ -227,6 +235,18 @@ def analyze_aircraft(
         f"in {time.perf_counter() - t0:.1f} s"
         + (" (pair cap reached; raise max_pairs or narrow the priors)" if capped else "")
     )
+    if not events.single_event and events.known_time is not None and len(cand):
+        # the clock as a second prior on a two-event search: a candidate's implied start must
+        # sit within the clock tolerance, the timing tolerance and event 1's own width
+        e1 = events.events[0]
+        half = VALLEY_HALF_T0_S if e1.valley is not None else e1.t0_s.half_width
+        slack = events.known_time_tolerance_s + cfg.funnel.timing_tolerance_s + half
+        keep = np.abs(cand.t_start - events.known_time.timestamp()) <= slack
+        cand = cand.subset(keep)
+        log.log(
+            f"known time with two events: {len(cand)} of {keep.size} candidates start within "
+            f"{slack:.1f} s of the clock"
+        )
     counts: dict[str, int] = {"flights": len(fs), "pairs": n_pairs, "candidates": len(cand)}
 
     heights = ground(cand.lat, cand.lon)
@@ -253,13 +273,11 @@ def analyze_aircraft(
     if cfg.funnel.silence_mode == "soft" and cand.silence_hits.size == len(cand):
         penalty = cfg.funnel.silence_penalty_db * cand.silence_hits.astype(float)
 
-    time_sweep = (
-        events.known_time_tolerance_s + events.events[0].t0_s.half_width
-        if events.single_event
-        else None
-    )
+    # known-time mode: the scorer sweeps the clock tolerance plus each candidate's own
+    # closest-approach width (see `time_sweep_for`); two-event mode sweeps its default
+    known_tol = events.known_time_tolerance_s if events.single_event else None
     t0 = time.perf_counter()
-    scores = _score_rows(index, fs, cand, cand.lat, cand.lon, heights, events, cfg, time_sweep)
+    scores = _score_rows(index, fs, cand, cand.lat, cand.lon, heights, events, cfg, known_tol)
     total = np.array([s.total for s in scores]) - penalty if scores else np.zeros(0)
     log.log(f"scored {len(cand)} candidates in {time.perf_counter() - t0:.1f} s")
 
@@ -279,14 +297,14 @@ def analyze_aircraft(
     for rank, i in enumerate(ranked, start=1):
         rlat, rlon, rs, rt = _refine_around(
             index, fs, cand, int(i), float(cand.lat[i]), float(cand.lon[i]),
-            cfg.refine_half_extent_m, cfg.refine_spacing_m, ground, events, cfg, time_sweep,
+            cfg.refine_half_extent_m, cfg.refine_spacing_m, ground, events, cfg, known_tol,
             float(penalty[i]),
         )  # fmt: skip
         j = int(np.argmax(rt))
         flat, flon, fine, ft = _refine_around(
             index, fs, cand, int(i), float(rlat[j]), float(rlon[j]),
             cfg.refine_fine_half_extent_m, cfg.refine_fine_spacing_m, ground, events, cfg,
-            time_sweep, float(penalty[i]),
+            known_tol, float(penalty[i]),
         )  # fmt: skip
         k = int(np.argmax(ft))
         if ft[k] >= rt[j]:
@@ -353,7 +371,7 @@ def analyze_aircraft(
             slant1=np.full(hlat.size, cand.slant1[i]), slant2=np.full(hlat.size, cand.slant2[i]),
             t_start=np.full(hlat.size, cand.t_start[i]),
         )  # fmt: skip
-        hs = _score_rows(index, fs, sub, hlat, hlon, ground(hlat, hlon), events, cfg, time_sweep)
+        hs = _score_rows(index, fs, sub, hlat, hlon, ground(hlat, hlon), events, cfg, known_tol)
         for la, lo, s in zip(hlat, hlon, hs, strict=True):
             features.append(
                 {

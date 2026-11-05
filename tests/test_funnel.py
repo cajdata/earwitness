@@ -123,6 +123,10 @@ def test_two_event_candidates_search_every_meeting_place():
     gap = EventSet([e1, e2]).gap()
     hints = fn.pair_prefilter(fs, e1, e2, gap, cfg)
     assert len(hints) > 5  # one per meeting place along the line, not one per pair
+    assert hints.speed.shape == (len(hints), 2)
+    assert np.all(np.abs(hints.speed - 70.0) < 1.0)  # both flights fly at 70 m/s
+    assert abs(hints[0].v1 - 70.0) < 1.0
+    assert np.isnan(fn.PairHint(0, 1, hints.xy[0]).v2)
     cand, _ = fn.two_event_candidates(fs, e1, e2, gap, lattice, cfg)
     assert len(cand) > 0
     d = geodesy.horizontal_distance(cand.lat, cand.lon, *SITE)
@@ -223,3 +227,89 @@ def test_tube_cells_near_a_hint_agree_with_the_full_tube():
     assert common.size >= 0.9 * near.ids.size
     np.testing.assert_allclose(near.heard[i_near], full.heard[i_full], atol=1e-6)
     np.testing.assert_allclose(near.slant[i_near], full.slant[i_full], atol=1e-6)
+
+
+def test_cpa_to_points_agrees_with_the_dense_distance_matrix():
+    # a turning track against many points: the tree picks the sample a full distance matrix would
+    t = np.arange(0.0, 300.0, 1.0)
+    track = np.column_stack([3000.0 * np.cos(t / 60.0), 3000.0 * np.sin(t / 60.0), 400.0 + t])
+    rng = np.random.default_rng(3)
+    pts = np.vstack([rng.uniform(-5000.0, 5000.0, size=(2000, 3)), [[0.0, 0.0, 460.0]]])
+    t_cpa, slant = fn.cpa_to_points(track, t, pts)
+    d2 = ((pts[:, None, :] - track[None, :, :]) ** 2).sum(axis=2)
+    nearest = np.argmin(d2, axis=1)
+    assert np.all(np.abs(t_cpa - t[nearest]) <= 1.0 + 1e-9)
+    assert np.all(slant <= np.sqrt(d2[np.arange(pts.shape[0]), nearest]) + 1e-9)
+    # worked number: from a point on the circle's axis every sample is 3000 m away horizontally
+    # and the height difference is t - 60 s, so the closest approach is at 60 s at exactly 3000 m
+    assert abs(t_cpa[-1] - 60.0) < 1e-6
+    assert abs(slant[-1] - 3000.0) < 1e-6
+    # empty inputs
+    assert fn.cpa_to_points(track, t, np.zeros((0, 3)))[0].size == 0
+
+
+def test_spatial_order_walks_rows_of_blocks():
+    xy = np.array([[90e3, 10e3], [10e3, 60e3], [20e3, 10e3], [70e3, 60e3]])
+    assert fn.spatial_order(xy).tolist() == [2, 0, 1, 3]
+    assert fn.spatial_order(np.zeros((0, 2))).size == 0
+
+
+def test_pair_cells_lay_the_narrow_tube_and_agree_with_the_two_tube_join():
+    cfg = fn.FunnelConfig()
+    # a distant fast aircraft first (wide tube), a close slow one second (narrow tube)
+    far = _flight("aaa111", 120.0, 90.0, 600.0, 3000.0, 600.0, span=900.0)
+    near = _flight("bbb222", 60.0, 200.0, 400.0, -250.0, 1100.0, span=900.0)
+    fs, lattice = _flight_set([far, near], cfg)
+    d_far = float(np.hypot(3000.0, 600.0))
+    d_near = float(np.hypot(250.0, 400.0))
+    e1 = _event("e1", 600.0 + d_far / 343.0, 110.0, 120.0, d_far)
+    e2 = _event("e2", 1100.0 + d_near / 343.0, 95.0, 60.0, d_near)
+    gap = EventSet([e1, e2]).gap()
+    hints = fn.pair_prefilter(fs, e1, e2, gap, cfg)
+    assert hints
+    radius = 3.0 * fn.pair_reach(e1, e2, cfg)
+    found = False
+    for hint in hints:
+        tube1 = fn.tube_cells(fs, hint.f1, e1, lattice, cfg, None, hint.xy, radius)
+        tube2 = fn.tube_cells(fs, hint.f2, e2, lattice, cfg, None, hint.xy, radius)
+        old = fn.timing_join(tube1, tube2, e1, gap, cfg)
+        new = fn.pair_cells(fs, hint, e1, e2, lattice, cfg, None, radius)
+        # every cell the two-tube join found is found, with the same heard times and slants,
+        # plus at most the band-edge cells the laid wide tube missed
+        assert set(old.cell.tolist()) <= set(new.cell.tolist())
+        _, i_old, i_new = np.intersect1d(old.cell, new.cell, return_indices=True)
+        assert np.allclose(old.heard1[i_old], new.heard1[i_new], atol=1e-6)
+        assert np.allclose(old.heard2[i_old], new.heard2[i_new], atol=1e-6)
+        assert np.allclose(old.slant1[i_old], new.slant1[i_new], atol=1e-6)
+        assert np.allclose(old.slant2[i_old], new.slant2[i_new], atol=1e-6)
+        assert np.all((new.slant1 >= e1.d_m.lo) & (new.slant1 <= e1.d_m.hi))
+        if len(new):
+            found |= bool(geodesy.horizontal_distance(new.lat, new.lon, *SITE).min() < 150.0)
+    assert found
+
+
+def test_a_profiled_event_narrows_the_tube_to_the_flights_speed():
+    cfg = fn.FunnelConfig()
+    # a trace without wings: d grows as v^2 along the valley, 500 m at 70 m/s
+    valley = np.array([[50.0, 255.0, 112.0, 599.0], [70.0, 500.0, 110.0, 600.0],
+                       [100.0, 1020.0, 107.0, 601.0]])  # fmt: skip
+    event = FlyoverEvent(
+        "e1", Range(597.0, 603.0), Range(104.0, 115.0), Range(40.0, 110.0), Range(100.0, 1600.0),
+        valley=valley,
+    )  # fmt: skip
+    right = _flight("aaa111", 70.0, 90.0, 400.0, 300.0, 600.0)  # 500 m slant at 70 m/s: fits
+    fast = _flight("bbb222", 100.0, 90.0, 400.0, 150.0, 600.0)  # 427 m at 100 m/s: the valley
+    # says 1020 m there, so the site is out of its band even inside the envelope [100, 1600]
+    fs, lattice = _flight_set([right, fast], cfg)
+    tube = fn.tube_cells(fs, 0, event, lattice, cfg)
+    assert tube.ids.size > 0
+    assert geodesy.horizontal_distance(tube.lat, tube.lon, *SITE).min() < 150.0
+    assert np.all(np.abs(tube.speed - 70.0) < 1.0)
+    other = fn.tube_cells(fs, 1, event, lattice, cfg)
+    assert np.all(other.slant >= 510.0 - 1e-6)
+    assert geodesy.horizontal_distance(other.lat, other.lon, *SITE).min() > 120.0
+    # the known-time check uses the closest-approach time at the flight's speed
+    cand = fn.single_event_candidates(fs, event, T0, 1.0, lattice, cfg)
+    near = geodesy.horizontal_distance(cand.lat, cand.lon, *SITE) < 120.0
+    assert near.any()
+    assert set(cand.f1[near].tolist()) == {0}

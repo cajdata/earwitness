@@ -16,6 +16,7 @@ from pathlib import Path
 
 import numpy as np
 import pyarrow as pa
+import pyarrow.compute as pc
 from numpy.typing import NDArray
 from scipy.interpolate import PchipInterpolator
 
@@ -129,6 +130,19 @@ def _column(table: pa.Table, name: str, dtype: type = float) -> np.ndarray:
     return table.column(name).to_numpy(zero_copy_only=False).astype(dtype)
 
 
+def _strings(table: pa.Table, name: str) -> tuple[NDArray[np.int64], list[str]]:
+    """Dictionary codes (-1 where null) and the distinct values of a string column.
+
+    One Python string per distinct value rather than per row: a continental day has 60 million
+    rows, and building a string object for each took most of the preparation time and tens of
+    gigabytes.
+    """
+    enc = pc.dictionary_encode(table.column(name).combine_chunks())
+    codes = np.asarray(enc.indices.fill_null(-1).to_numpy(zero_copy_only=False), dtype=np.int64)
+    words = ["" if w is None else str(w) for w in enc.dictionary.to_pylist()]
+    return codes, words
+
+
 def prepare_flights(
     table: pa.Table,
     types: TypeTable | None = None,
@@ -139,10 +153,16 @@ def prepare_flights(
     """Flights from a cached day table (see `earwitness.data.adsb_lol`)."""
     if table.num_rows == 0:
         return []
-    icao = np.asarray(table.column("icao").to_pylist(), dtype=object)
+    icao_codes, icao_words = _strings(table, "icao")
+    # aircraft in alphabetical order, as a sort on the strings themselves would give
+    rank = np.empty(len(icao_words), dtype=np.int64)
+    rank[np.argsort(np.asarray(icao_words, dtype=object), kind="stable")] = np.arange(rank.size)
+    icao_key = np.full(icao_codes.shape, -1, dtype=np.int64)
+    icao_key[icao_codes >= 0] = rank[icao_codes[icao_codes >= 0]]
     t = np.asarray(table.column("time").to_numpy()).astype("datetime64[ns]").astype("int64") / 1e9
-    order = np.lexsort((t, icao))
-    icao = icao[order]
+    order = np.lexsort((t, icao_key))
+    icao_key = icao_key[order]
+    icao_codes = icao_codes[order]
     t = t[order]
     lat = _column(table, "lat")[order]
     lon = _column(table, "lon")[order]
@@ -151,14 +171,19 @@ def prepare_flights(
     on_ground = _column(table, "on_ground", bool)[order]
     gs = _column(table, "gs_kt", np.float32)[order] * KT_TO_MPS
     flags = _column(table, "flags", np.int16)[order]
-    type_code = np.asarray(table.column("type_code").to_pylist(), dtype=object)[order]
-    description = np.asarray(table.column("description").to_pylist(), dtype=object)[order]
-    registration = np.asarray(table.column("registration").to_pylist(), dtype=object)[order]
+    type_codes, type_words = _strings(table, "type_code")
+    desc_codes, desc_words = _strings(table, "description")
+    reg_codes, reg_words = _strings(table, "registration")
+    type_codes, desc_codes, reg_codes = type_codes[order], desc_codes[order], reg_codes[order]
+
+    def word(words: list[str], codes: NDArray[np.int64], i: int) -> str:
+        c = int(codes[i])
+        return words[c] if c >= 0 else ""
 
     flights: list[Flight] = []
-    boundaries = np.flatnonzero(np.r_[True, icao[1:] != icao[:-1], True])
+    boundaries = np.flatnonzero(np.r_[True, icao_key[1:] != icao_key[:-1], True])
     for a, b in itertools.pairwise(boundaries):
-        code = str(type_code[a])
+        code = word(type_words, type_codes, a)
         klass = classify(code, types)
         for leg_no, (s, e) in enumerate(split_legs(t[a:b], flags[a:b], on_ground[a:b], gap_s)):
             sl = slice(a + s, a + e)
@@ -183,10 +208,10 @@ def prepare_flights(
                 )
             flights.append(
                 Flight(
-                    icao=str(icao[a]),
+                    icao=word(icao_words, icao_codes, a),
                     leg=leg_no,
                     type_code=code,
-                    description=str(description[a]),
+                    description=word(desc_words, desc_codes, a),
                     engine_class=klass,
                     time_unix=t[idx],
                     lat=lat[idx],
@@ -194,7 +219,7 @@ def prepare_flights(
                     height_m=heights,
                     gs_mps=speed,
                     height_source=source,
-                    registration=str(registration[a]),
+                    registration=word(reg_words, reg_codes, a),
                 )
             )
     return flights
