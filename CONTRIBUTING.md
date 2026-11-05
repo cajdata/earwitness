@@ -48,3 +48,8 @@ The full spec is docs/HANDOFF.md. Read it before changing anything in src/.
   it in the background with its own log; its `run.log` reports prefilter and funnel progress.
   A known recording time (`--known-time`, `--known-time-tolerance`) constrains a two-event
   search as well as driving the single-event mode: use every clue the recording gives.
+- Real-case tools in `scripts/`: `m6_spectrogram.py` (overview strips and zooms, the first look),
+  `m6_measure.py` (trace and fit flyovers the UI's way into events.json, with the speed
+  profile and heard times), `m6_event_overlay.py` (trace and fits over the spectrogram),
+  `m6_truth_check.py` (when a case fails: which flights passed the true site and how it scores
+  by hand with them; every M6 bug was a measurement or convention problem it exposed).
