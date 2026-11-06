@@ -230,8 +230,9 @@ def make_zip(folder: Path) -> Path:
         for path in sorted(folder.rglob("*")):
             z.write(path, path.relative_to(folder.parent))
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    # LF even on Windows: `sha256sum -c` reads a CR as part of the file name
     archive.with_name(archive.name + ".sha256").write_text(
-        f"{digest}  {archive.name}\n", encoding="ascii"
+        f"{digest}  {archive.name}\n", encoding="ascii", newline="\n"
     )
     return archive
 

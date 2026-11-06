@@ -16,7 +16,7 @@ offline; it passes when every check passes and both answers rank first within 5 
 | Windows build smoke (`build_windows.py --smoke`: demo with `--workers 2`, audit) | the frozen build, PyInstaller 6.22.3 | passed; the folder is 343 MB, the zip 155 MB |
 | Frozen build on the data paths the demo skips (scratch cache) | the same | one GLM hour downloaded and parsed (2025-05-16 22Z, 180 files, 91 MB, 61,317 flashes); land mask; terrain with three Copernicus tiles downloaded over HTTPS |
 | `earwitness-ui.exe` started as a double-click starts it | the same | window open and responding; page, licence file and API served; the API refuses requests without the session token |
-| Clean machine: Windows Sandbox, `packaging/sandbox/start-clean-machine-test.ps1` | a fresh Windows | pending |
+| Clean machine: Windows Sandbox, `packaging/sandbox/start-clean-machine-test.ps1`, on the zip the v0.1.0 tag run built | a fresh Windows 11 Enterprise 10.0.26100 in Windows Sandbox: no Python, no ffmpeg, WebView2 156 | all six checks passed: checksum, unzip, `--version`, demo (thunder 242 m, aircraft 13 m, both rank 1), audit, and the desktop app in its own window listing both demo runs |
 | Dry run of the in-sandbox script on the development machine | Windows PowerShell 5.1 | all six checks passed |
 | `pipx install` of the wheel, then `earwitness demo` and `earwitness ui --serve` | `python:3.12-slim` (Debian 13) container | passed once `libexpat1` was installed; the page and both demo runs were served |
 

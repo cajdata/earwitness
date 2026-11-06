@@ -28,7 +28,9 @@ The full spec is docs/HANDOFF.md. Read it before changing anything in src/.
   public thunder recording located, nine documented as failures); acceptance results are in
   docs/VALIDATION.md. M7 (release v0.1.0 and the site) built on 2026-11-05: the Windows build,
   docs/INSTALL.md, docs/COUNTERMEASURES.md, the attribution in docs/DATA_SOURCES.md, the
-  release notes in docs/release-notes/, and the site; docs/RELEASING.md has the steps.
+  release notes in docs/release-notes/, and the site; docs/RELEASING.md has the steps. v0.1.0
+  released on 2026-11-06 (PyPI, and a GitHub Release with the Windows zip) after the
+  clean-machine check passed in Windows Sandbox.
 - `earwitness demo` is the install check: library checks on tiny files of their own (GDAL and
   PROJ, the GLM NetCDF reader, Parquet, GEOS), then the two synthetic cases located offline.
   Keep it offline and under a minute; the Windows build's smoke test and the clean-machine
