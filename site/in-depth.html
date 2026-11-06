@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>In depth · Earwitness</title>
+  <meta name="description" content="The Earwitness method in detail: forward models, search pipelines, scoring, and validation numbers.">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="bar">
+  <div class="inner">
+    <a class="brand" href="./"><img src="favicon.svg" alt="">Earwitness</a>
+    <nav aria-label="Site">
+      <a href="how-it-works.html">How it works</a>
+      <a href="protect.html">Protect your recordings</a>
+      <a href="results.html">Results</a>
+      <a href="data.html">Data sources</a>
+      <a href="install.html">Install</a>
+      <a href="in-depth.html" aria-current="page">In depth</a>
+      <a href="https://github.com/cajdata/earwitness">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <h1>In depth</h1>
+  <p class="lead">The forward models, the search pipelines, how candidates are scored, and the
+    validation numbers. The maintained sources are
+    <a href="https://github.com/cajdata/earwitness/blob/main/docs/METHOD.md">METHOD.md</a>,
+    <a href="https://github.com/cajdata/earwitness/blob/main/docs/VALIDATION.md">VALIDATION.md</a> and the
+    <a href="https://github.com/cajdata/earwitness/blob/main/docs/HANDOFF.md">specification</a>.</p>
+
+  <p class="small">On this page: <a href="#principle">Principle</a> ·
+    <a href="#thunder">Thunder</a> · <a href="#aircraft">Aircraft</a> ·
+    <a href="#lessons">What real recordings taught</a> ·
+    <a href="#validation">Validation</a> · <a href="#reproduce">Reproduce</a></p>
+
+  <h2 id="principle">Principle</h2>
+  <p>Never invert audio into a location. Instead, for every candidate location and every
+    recording start time, predict the signal the recording would contain from logged events
+    (lightning flashes, ADS-B tracks), score the prediction against the recording, and rank.
+    The unknown start time plays the role of a GPS receiver's clock bias. The spacing between
+    events constrains the position, and the geometry of the sources sets the shape of the
+    uncertainty: sources in one direction give a ridge, not a point.</p>
+  <p>Internally everything is SI and UTC. Geometry runs in ECEF with WGS84 heights. Aircraft use
+    geometric (GNSS) altitude where broadcast, and barometric altitude shifted by each leg's
+    median geometric-minus-barometric offset elsewhere. Ground height is Copernicus GLO-30 plus
+    the EGM96 geoid undulation, so aircraft and ground share the ellipsoid.</p>
+
+  <h2 id="thunder">Thunder</h2>
+  <h3>Observed envelope</h3>
+  <p>Decode to mono, resample to 2 kHz, zero-phase Butterworth band-pass 20 to 250 Hz, RMS over
+    0.25 s frames, Gaussian smoothing (about 5 s), subtract the 10th-percentile floor, and
+    resample to the sweep step. A heuristic wind flag (20 to 60 Hz dominating 60 to 250 Hz) can
+    mask frames.</p>
+  <h3>Forward model</h3>
+  <p>For flash <i>i</i> at horizontal distance <i>d<sub>h</sub></i>, source height
+    <i>h</i> = 2,000 m and sound speed <i>c</i> = 343 m/s:</p>
+  <div class="formula">t<sub>arr,i</sub> = t<sub>flash,i</sub> + √(d<sub>h</sub>² + h²) / c</div>
+  <p>Loudness falls off with distance <i>r</i> as a power <i>p</i> = 2 with a near-field
+    cap, so close strikes saturate like a clipped microphone:</p>
+  <div class="formula">A<sub>i</sub> = (r<sub>near</sub> / max(r<sub>i</sub>, r<sub>near</sub>))<sup>p</sup></div>
+  <p>Each flash is rendered as a fast-attack, slow-decay pulse whose decay grows with distance
+    (distant thunder rumbles longer), and the sum is smoothed like the observed side:</p>
+  <div class="formula">k(t) = (1 − e<sup>−t/rise</sup>) · e<sup>−t/decay</sup>, &nbsp;
+    m(t) = Σ<sub>i</sub> A<sub>i</sub> k(t − t<sub>arr,i</sub>)</div>
+  <h3>Score</h3>
+  <p>Sliding cosine similarity over every start offset τ, with the model energy taken only
+    inside the clip-length window <i>L</i>:</p>
+  <div class="formula">s(τ) = Σ<sub>t</sub> o(t) m(t + τ) / ( ‖o‖ · ‖m<sub>[τ, τ+L]</sub>‖ )</div>
+  <p>The numerator for all offsets is one FFT cross-correlation per batch of 256 candidates, and
+    the denominator a cumulative sum of m², so each candidate costs O(n log n). The Pearson
+    option removes the mean of each window first, so a continuous rumble shared by many places
+    earns no credit.</p>
+  <h3>Search</h3>
+  <ol>
+    <li>Candidate grid at 5 km, land only (Natural Earth), inside the region prior.</li>
+    <li>Prefilter: keep points with at least N flashes within 25 km in some clip-length window,
+      N = max(3, round(0.6 × observed peak count)).</li>
+    <li>Coarse pass at a 5 s step over the whole time prior.</li>
+    <li>Refine the best regions (greedy, at least 15 km apart) on a 1 km grid within 5 km at 1 s,
+      then on a 200 m grid within 1 km, staying inside the time prior.</li>
+  </ol>
+  <p>A continental-US day (682,694 flashes, 80,475 candidates after the prefilter, 17,281
+    offsets) runs in 114 s on one core. GLM places flashes to about 3 to 4 km, which is 9 to 12 s
+    of acoustic timing: in a dense storm the model can't tell which flash made which clap.</p>
+
+  <h2 id="aircraft">Aircraft Doppler</h2>
+  <h3>Measuring a flyover</h3>
+  <p>The spectrogram uses a long window for frequency resolution and is whitened per frequency
+    (dB above that frequency's median), so faint lines show and filters cancel out. Each flyover
+    is traced in the app and fitted with the straight, constant-speed model, with emission time
+    <i>t<sub>e</sub></i> and reception time <i>t<sub>r</sub></i>:</p>
+  <div class="formula">r(t<sub>e</sub>) = √(d² + v²(t<sub>e</sub> − t<sub>0</sub>)²), &nbsp;
+    v<sub>r</sub> = v²(t<sub>e</sub> − t<sub>0</sub>) / r(t<sub>e</sub>), &nbsp;
+    t<sub>r</sub> = t<sub>e</sub> + r(t<sub>e</sub>) / c</div>
+  <div class="formula">f(t<sub>r</sub>) = f<sub>0</sub> · c / (c + v<sub>r</sub>(t<sub>e</sub>))</div>
+  <p>Worked example from the unit tests: f<sub>0</sub> = 130 Hz at v<sub>r</sub> = −57.97 m/s
+    gives 156.44 Hz. Measurements are stored as ranges, not points. A trace without the curve's
+    far wings fixes only v²/d, so the fit profiles the speed: it holds v at 28 values from 15 to
+    300 m/s, refits the rest, and keeps every row within 0.5 Hz rms of the best. The search then
+    narrows distance, fundamental and timing to each real flight's own speed.</p>
+  <h3>Exact model</h3>
+  <p>For a candidate observer <b>o</b> and the real track <b>p</b>(t), interpolated to 1 s, the
+    emission time is found by fixed-point iteration, which converges in 3 to 5 steps because
+    v ≪ c:</p>
+  <div class="formula">t<sub>e</sub> = t<sub>r</sub> − ‖<b>p</b>(t<sub>e</sub>) − <b>o</b>‖ / c, &nbsp;
+    v<sub>r</sub> = <b>ṗ</b>(t<sub>e</sub>) · (<b>p</b>(t<sub>e</sub>) − <b>o</b>) / ‖<b>p</b>(t<sub>e</sub>) − <b>o</b>‖</div>
+  <p>Using the aircraft's position at reception time instead gives a differently shaped curve,
+    not just a delayed one; a unit test checks that.</p>
+  <h3>Funnel</h3>
+  <ol>
+    <li><b>Flights:</b> piston and turboprop types (ICAO description letter P or T) and unknowns;
+      jets and helicopters are dropped.</li>
+    <li><b>Speed gate:</b> samples whose speed fits the event's profile.</li>
+    <li><b>Pair prefilter:</b> each sample implies a recording start for each event, were the
+      closest approach there. Samples of two flights are matched in position and implied start,
+      which keeps the search to pairs that meet in space in the right time order.</li>
+    <li><b>Distance tube:</b> 200 m cells where the closest-approach slant distance fits the
+      event at that flight's speed, using terrain. Each cell walks along the track to the closest
+      approach of its own pass, because aircraft in a traffic pattern pass the same spot several
+      times.</li>
+    <li><b>Timing:</b> both events must imply the same start, within tolerance; with a clock,
+      the start must also match it.</li>
+    <li><b>Silence:</b> drop (hard) or penalize by 3 dB per flight (soft) candidates that would
+      have heard another flight within 4 km while the recording was silent.</li>
+  </ol>
+  <h3>Score and refine</h3>
+  <p>The score is the whitened brightness along each modeled curve, averaged over a 60 s window
+    either side of the heard closest approach, with frames weighted by (closest slant / slant)
+    so the loud, steep part decides. Frames the track doesn't cover count as zero with full
+    weight: a leg must explain the whole flyover, not just its brightest seconds. Harmonics are
+    averaged with weights 1/n. Event 1 sweeps a small time shift and f<sub>0</sub>; event 2
+    sweeps f<sub>0</sub> only, because its timing relative to event 1 is fixed by the geometry.
+    The best cell of each top flight pair is refined at 100 m within 300 m, then at 25 m within
+    100 m.</p>
+  <p>One straight flyover is mirror-symmetric across its ground track, so a single event with a
+    clock gives the site and its reflection. Track curvature, terrain, silence or a second event
+    break the tie.</p>
+
+  <h2 id="lessons">What real recordings taught</h2>
+  <p>Every M6 failure turned out to be a measurement or convention problem, found by scoring the
+    true site by hand with the true flights:</p>
+  <ul>
+    <li><b>Heard crossing, not closest approach.</b> The fit reported when the plane was nearest;
+      the search expects when that sound arrived, d/c later. For a 6 km flyover that is 18 s, which
+      put the modeled curve 18 Hz off the line.</li>
+    <li><b>Honest speed ranges.</b> A faint trace fitted 60 to 230 m/s equally well while the fit
+      claimed ±2.7 m/s. The true aircraft flew 104 m/s and was excluded until the fit profiled the
+      speed.</li>
+    <li><b>Passes.</b> Pattern traffic passes a spot every few minutes, and only one pass was heard;
+      the funnel now resolves each pass.</li>
+    <li><b>Clocks.</b> A known start was first treated as an alternative to a second event. Used
+      together, they located the phone video that each failed alone.</li>
+  </ul>
+
+  <h2 id="validation">Validation</h2>
+  <h3>Synthetic acceptance</h3>
+  <div class="table-wrap">
+    <table>
+      <tr><th>Check</th><th>Result</th><th>Notes</th></tr>
+      <tr><td>Thunder, 10 sites beside a real severe-weather evening (2025-05-16, 50,000 flashes in 3 h)</td><td>9 of 10 first within 5 km (cosine); 10 of 10 (Pearson)</td><td>Median error 1.2 km; the miss is a single-direction ridge, second at 0.975 vs 0.977</td></tr>
+      <tr><td>Thunder, far rumble the model doesn't render (flashes to 50 km)</td><td>7 of 10</td><td>Three cases lost to impostors hundreds of km away: the audible radius matters</td></tr>
+      <tr><td>Thunder, continental-US day</td><td>First, 221 m off</td><td>114 s on one core</td></tr>
+      <tr><td>Aircraft, two flyovers on real 2026-09-08 tracks, no clock, 15° × 12° region</td><td>10 of 10 first within 200 m</td><td>Errors 10 to 23 m, margins 2.1 to 8.0 dB, 25 min for all ten</td></tr>
+      <tr><td>Aircraft, one flyover with a clock</td><td>10 of 10 first within 200 m</td><td>Three wins by under 1 dB: one event plus a clock gives a short list</td></tr>
+    </table>
+  </div>
+  <h3>Real recordings</h3>
+  <div class="table-wrap">
+    <table>
+      <tr><th>Case</th><th>Mode</th><th>Rank-1 error</th><th>Rank of truth</th><th>Margin</th><th>Run time</th></tr>
+      <tr><td>colsto's test recording, metro region</td><td>two flyovers, no clock</td><td>173 m</td><td>1</td><td>1.61 dB</td><td>546 s on 12 processes</td></tr>
+      <tr><td>Phone video, metro box</td><td>two flyovers, clock ±2 s</td><td>190 m</td><td>1</td><td>3.33 dB</td><td>65 s</td></tr>
+      <tr><td>Phone video, metro box</td><td>two flyovers, no clock</td><td>46 km</td><td>313th (best nearby cell)</td><td></td><td>849 s</td></tr>
+      <tr><td>Phone video, metro box</td><td>loud flyover, clock ±2 s</td><td>11.5 km</td><td>5</td><td>0.02 dB</td><td>79 s</td></tr>
+      <tr><td>Thunder, 8 min, nearest flash 0.6 km, 121 flashes in the province that day</td><td>a day, province box</td><td>2.2 km</td><td>1</td><td>0.084</td><td>6 s</td></tr>
+      <tr><td>Thunder, the same clip over western North America</td><td>a day</td><td>2.1 km</td><td>1</td><td>0.000 (tie)</td><td>11 s</td></tr>
+      <tr><td>Thunder, two dense storms</td><td>a day, state box</td><td>73 and 479 km</td><td>none in top 10</td><td></td><td>20 to 51 s</td></tr>
+      <tr><td>Thunder, five scattered storms, distant claps</td><td>a day, state box</td><td>23 to 439 km</td><td>best 10th</td><td></td><td>6 to 24 s</td></tr>
+      <tr><td>Thunder, one clap, no clock</td><td>±1 h, state box</td><td>53 km</td><td>none</td><td>0.000</td><td>4 s</td></tr>
+      <tr><td>Thunder, five claps in 110 s, clock ±3 s</td><td>state box</td><td>33 km</td><td>6</td><td>0.007</td><td>3 s</td></tr>
+    </table>
+  </div>
+  <h3>How short a clip can be (with a clock)</h3>
+  <div class="table-wrap">
+    <table>
+      <tr><th>Clue in the clip</th><th>Shortest clip located first within 200 m</th></tr>
+      <tr><td>Two flyovers 97 s apart (phone video)</td><td>150 s (130 m off)</td></tr>
+      <tr><td>Two flyovers 924 s apart (colsto's recording)</td><td>1,000 s, the shortest that holds both</td></tr>
+      <tr><td>One distinctive turboprop, 3.5 km away</td><td>90 s (95 m off)</td></tr>
+      <tr><td>One common trainer in a busy metro</td><td>never first; 4th or 5th at best</td></tr>
+      <tr><td>One loud flyover 6 km away</td><td>never within 200 m: the right plane, about 670 m off</td></tr>
+    </table>
+  </div>
+  <p>Machine for the run times: Intel Core Ultra 7 270K Plus, 31 GB RAM. Thunder scoring is
+    single-threaded numpy; aircraft scoring takes <code>--workers</code> processes.</p>
+
+  <h2 id="reproduce">Reproduce</h2>
+  <pre><code>earwitness demo                                   # install check, offline
+uv run python scripts/m2_acceptance.py ...        # thunder acceptance (VALIDATION.md has the flags)
+uv run python scripts/m4_acceptance.py ...        # aircraft acceptance
+uv run python scripts/m7_countermeasures.py       # filters, codecs and cuts on the demo cases</code></pre>
+  <p>Every analysis writes a run folder with its priors, events, configuration, results, heat map
+    and log, so any result can be rerun from its folder. Real-recording truths stay in private
+    files and are read only when scoring.</p>
+</main>
+
+<footer>
+  <div class="inner">
+    <p>Earwitness 0.1.0 · <a href="https://github.com/cajdata/earwitness">Source on GitHub</a> ·
+      Apache-2.0 · <a href="data.html">Data sources and credits</a></p>
+    <p>This site sets no cookies and loads no scripts, fonts or trackers.</p>
+  </div>
+</footer>
+</body>
+</html>

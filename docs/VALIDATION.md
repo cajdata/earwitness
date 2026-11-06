@@ -3,6 +3,49 @@
 Results of the acceptance checks, synthetic first (M2, M4, M5) and real recordings last (M6).
 Every number here comes from a run that can be repeated with the command shown.
 
+## M7: release checks
+
+Acceptance criterion (HANDOFF M7): a clean Windows machine can install and run the synthetic
+demo. The demo (`earwitness demo`) runs library checks on small inputs of its own, then
+renders a thunder case and a two-flyover aircraft case with known answers and locates both
+offline; it passes when every check passes and both answers rank first within 5 km and 200 m.
+
+| check | where | result |
+| --- | --- | --- |
+| `earwitness demo` from source | Windows 11, Python 3.12.14 | passed: thunder 242 m, aircraft 13 m, both rank 1, 9 s |
+| Windows build smoke (`build_windows.py --smoke`: demo with `--workers 2`, audit) | the frozen build, PyInstaller 6.22.3 | passed; the folder is 343 MB, the zip 155 MB |
+| Frozen build on the data paths the demo skips (scratch cache) | the same | one GLM hour downloaded and parsed (2025-05-16 22Z, 180 files, 91 MB, 61,317 flashes); land mask; terrain with three Copernicus tiles downloaded over HTTPS |
+| `earwitness-ui.exe` started as a double-click starts it | the same | window open and responding; page, licence file and API served; the API refuses requests without the session token |
+| Clean machine: Windows Sandbox, `packaging/sandbox/start-clean-machine-test.ps1` | a fresh Windows | pending |
+| Dry run of the in-sandbox script on the development machine | Windows PowerShell 5.1 | all six checks passed |
+| `pipx install` of the wheel, then `earwitness demo` and `earwitness ui --serve` | `python:3.12-slim` (Debian 13) container | passed once `libexpat1` was installed; the page and both demo runs were served |
+
+What the checks found and fixed:
+
+- The first frozen build lacked rasterio's `serde` module and its GDAL and PROJ data: rasterio
+  has no PyInstaller hook, so a terrain run failed while the offline demo passed.
+  `packaging/hooks/hook-rasterio.py` collects them, and the demo's install checks now load
+  GDAL and PROJ, the GLM NetCDF reader, Parquet and GEOS, so a missing module fails the smoke
+  test instead of a user's first real analysis.
+- `uv build` makes the wheel from the sdist, and the sdist left out the gitignored built front
+  end, so the wheel had no UI (158 KB against 1.9 MB). The sdist now carries it, and the
+  release workflow checks both packages.
+- rasterio's Linux wheel links the system's `libexpat.so.1`, which minimal images lack;
+  docs/INSTALL.md says so, and the demo's terrain check reports it.
+- Without the WebView2 runtime, pywebview falls back to the retired Internet Explorer engine,
+  which cannot run the front end; the launcher now checks for the runtime and opens the
+  browser instead (on Linux, when neither GTK nor Qt is installed).
+- A review of the release work found that the build copied licence files flat by name, so
+  same-named files overwrote each other (numpy's own notice was replaced by LAPACK's, and
+  h5py lost HDF5's); they keep their paths now. It also found setuptools and pytest's internals
+  collected though never run, now excluded; a sdist built in a local checkout picking up files
+  that only `.git/info/exclude` keeps out of git, now prevented by an explicit include list;
+  and a clean-machine check that tested a dry run's zip rather than the release's own, now done
+  on the tag run's artifact before the PyPI approval.
+
+The countermeasure sweep on the demo cases (`scripts/m7_countermeasures.py`) is in
+[COUNTERMEASURES.md](COUNTERMEASURES.md).
+
 ## M6: real-world recordings
 
 Acceptance criterion (HANDOFF M6): at least one real aircraft case and one real thunder case

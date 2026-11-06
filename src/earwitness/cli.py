@@ -1,7 +1,7 @@
 """Command-line entry point: `earwitness <command>`. The planned surface is in docs/HANDOFF.md.
 
 Implemented: `simulate thunder|aircraft` (M1), `data glm` and `analyze thunder` (M2), `data adsb`
-(M3), `analyze aircraft` (M4), `audit` and `ui` (M5).
+(M3), `analyze aircraft` (M4), `audit` and `ui` (M5), `demo` (M7, the install check).
 """
 
 from __future__ import annotations
@@ -55,6 +55,12 @@ def build_parser() -> argparse.ArgumentParser:
     _build_audit(sub.add_parser("audit", help="report which location clues a recording contains"))
 
     _build_ui(sub.add_parser("ui", help="open the desktop UI"))
+
+    _build_demo(
+        sub.add_parser(
+            "demo", help="simulate a thunder and an aircraft recording and locate both, offline"
+        )
+    )
     return parser
 
 
@@ -646,6 +652,60 @@ def _ui(args: argparse.Namespace) -> int:
 
     mode = "serve" if args.serve else "browser" if args.browser else "window"
     return launch(cache=args.cache, runs_dir=args.runs_dir, port=args.port, mode=mode)
+
+
+def _build_demo(p: argparse.ArgumentParser) -> None:
+    p.description = (
+        "Check that the libraries the analyses use load and work, then render a synthetic "
+        "thunder recording and a synthetic two-flyover aircraft recording with known answers, "
+        "audit both, and locate both against the synthetic strikes and tracks written beside "
+        "them. Needs no network, data cache or ffmpeg. Exits 0 when every check passes and both "
+        "answers rank first within 5 km (thunder) and 200 m (aircraft)."
+    )
+    p.add_argument(
+        "--out",
+        type=Path,
+        default=Path("earwitness-demo"),
+        help="folder for the two cases (default earwitness-demo/)",
+    )
+    p.add_argument(
+        "--runs-dir",
+        type=Path,
+        default=None,
+        help="folder for the run folders (default runs/, where `earwitness ui` looks)",
+    )
+    p.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="processes that score aircraft candidates; more than 1 also checks that "
+        "scoring in child processes works (default 1)",
+    )
+    p.add_argument("--verbose", action="store_true", help="show the pipelines' progress logs")
+    p.set_defaults(func=_demo)
+
+
+def _demo(args: argparse.Namespace) -> int:
+    from earwitness.demo import run_demo
+
+    runs_dir = args.runs_dir if args.runs_dir is not None else Path("runs")
+    print(f"Earwitness {__version__} demo: two synthetic recordings with known answers.")
+    print("Every input is synthetic and nothing is downloaded.\n")
+    progress = print if args.verbose else None
+    checks, results = run_demo(args.out, runs_dir, progress=progress, workers=args.workers)
+    passed = all(r.passed for r in results) and all(c.status != "fail" for c in checks)
+    print()
+    print("cases:   " + ", ".join(str(r.case_dir) for r in results))
+    print("runs:    " + ", ".join(str(r.run_dir) for r in results))
+    ui = "earwitness ui" if args.runs_dir is None else f'earwitness ui --runs-dir "{runs_dir}"'
+    print(f"Open the runs in the desktop UI with `{ui}` (Results).")
+    if passed:
+        print("demo passed")
+    elif any(c.status == "fail" for c in checks):
+        print("demo FAILED: an install check failed (see the FAIL lines above)")
+    else:
+        print("demo FAILED: an answer missed its tolerance")
+    return 0 if passed else 1
 
 
 def _seed_and_rng(seed: int | None) -> tuple[int, np.random.Generator]:

@@ -1,0 +1,43 @@
+name: Pages
+
+# Publishes site/ to GitHub Pages (earwitness.dev). One-time setup in the repository's
+# Settings -> Pages: Source "GitHub Actions", custom domain earwitness.dev, Enforce HTTPS.
+# docs/RELEASING.md has the DNS records.
+on:
+  push:
+    branches: [main]
+    paths: ["site/**", "tests/test_site.py", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check links, self-containment and privacy of the pages
+        run: pipx run pytest tests/test_site.py -q -p no:cacheprovider
+
+  deploy:
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v5

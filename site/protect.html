@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Protect your recordings · Earwitness</title>
+  <meta name="description" content="What does and doesn't stop a recording from being located by background thunder or propeller planes.">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="bar">
+  <div class="inner">
+    <a class="brand" href="./"><img src="favicon.svg" alt="">Earwitness</a>
+    <nav aria-label="Site">
+      <a href="how-it-works.html">How it works</a>
+      <a href="protect.html" aria-current="page">Protect your recordings</a>
+      <a href="results.html">Results</a>
+      <a href="data.html">Data sources</a>
+      <a href="install.html">Install</a>
+      <a href="in-depth.html">In depth</a>
+      <a href="https://github.com/cajdata/earwitness">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <h1>Protect your recordings</h1>
+  <p class="lead">What gives a recording away is the timing between its sounds and anything that
+    says when it was made. Change those, and the search has much less to work with. Filters and
+    compression don't help.</p>
+
+  <div class="box">
+    <h3>First, check what's in it</h3>
+    <pre><code>earwitness audit my-video.mp4</code></pre>
+    <p class="small">Or open the desktop app, which starts with the same audit. It lists the clues it
+      hears and what helps against each.</p>
+  </div>
+
+  <h2>What helps</h2>
+  <div class="table-wrap">
+    <table>
+      <tr><th>Step</th><th>Why it helps</th></tr>
+      <tr>
+        <td><span class="label ok">helps</span> Cut the recording</td>
+        <td>A cut changes the gap between sounds. A search for two passing planes needs the real
+          gap: after one 60 second cut between them, it found nothing at all. Several cuts also
+          throw off thunder, moving the answer in our test from 0.2 km to 4.5 km.</td>
+      </tr>
+      <tr>
+        <td><span class="label ok">helps</span> Remove the clock</td>
+        <td>A known start time is the biggest help to a search. With the phone's own clock, a phone
+          video was located to 190 m. Without it, the same search failed. Hide on-screen clocks
+          and timestamps, and don't say the time out loud.</td>
+      </tr>
+      <tr>
+        <td><span class="label ok">helps</span> Strip the metadata</td>
+        <td>Phone videos often store GPS coordinates and the time they were made. That gives the place
+          away without any sound analysis. Many apps can remove it. With ffmpeg:
+          <code>ffmpeg -i in.mp4 -map_metadata -1 -c copy out.mp4</code></td>
+      </tr>
+      <tr>
+        <td><span class="label ok">helps</span> Heavy noise reduction</td>
+        <td>Strong noise reduction can wipe out faint plane sounds and quieter claps. colsto's tests
+          showed this; we haven't measured it ourselves.</td>
+      </tr>
+    </table>
+  </div>
+
+  <h2>What doesn't help</h2>
+  <div class="table-wrap">
+    <table>
+      <tr><th>Step</th><th>What happened</th></tr>
+      <tr>
+        <td><span class="label bad">doesn't help</span> Low-cut or bass filter</td>
+        <td>The plane's curve came back as soon as the volume was turned up, in colsto's tests and
+          ours. Even a steep filter that removed the main tone left its overtones, and the search
+          still found the spot.</td>
+      </tr>
+      <tr>
+        <td><span class="label bad">doesn't help</span> Compression (MP3, AAC, phone calls)</td>
+        <td>Low-quality MP3 and AAC changed nothing in our tests, and the curve survived phone-call
+          compression in colsto's. Codecs keep loud, steady tones, and a propeller's drone is one.</td>
+      </tr>
+      <tr>
+        <td><span class="label bad">doesn't help</span> Talking over it</td>
+        <td>The curve was still there underneath, in colsto's tests.</td>
+      </tr>
+      <tr>
+        <td><span class="label warn">not enough</span> Keeping it short</td>
+        <td>Shorter clips are harder, but short is not safe. With a clock, a 150 second phone
+          clip with two planes in it was located to 130 m. About 90 seconds around one distinctive
+          plane was enough, and in colsto's test a 1 minute clip was solved. An 8 minute clip with
+          one close thunderclap was located to 2.2 km.</td>
+      </tr>
+    </table>
+  </div>
+
+  <h2>When a clue is weak anyway</h2>
+  <ul>
+    <li>Thunder in a big storm, where claps run together, or thunder far away (10 to 25 km) was not
+      located.</li>
+    <li>A single clap with no clock fits almost anywhere.</li>
+    <li>One flyover of a common training plane was ambiguous, even with a clock: other trainers
+      nearby make nearly the same sound.</li>
+  </ul>
+  <p>These are measured results, not guarantees. A recording that defeats one search may still
+    give itself away to a better one, or to a different clue entirely.</p>
+
+  <h2>Not tested yet</h2>
+  <p>Changing the pitch or speed of the audio, or replacing the soundtrack with music, would
+    likely help, but nobody has measured them here.</p>
+
+  <p>The details, with every test listed:
+    <a href="https://github.com/cajdata/earwitness/blob/main/docs/COUNTERMEASURES.md">COUNTERMEASURES.md</a>.</p>
+</main>
+
+<footer>
+  <div class="inner">
+    <p>Earwitness 0.1.0 · <a href="https://github.com/cajdata/earwitness">Source on GitHub</a> ·
+      Apache-2.0 · <a href="data.html">Data sources and credits</a></p>
+    <p>This site sets no cookies and loads no scripts, fonts or trackers.</p>
+  </div>
+</footer>
+</body>
+</html>

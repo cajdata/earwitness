@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Install · Earwitness</title>
+  <meta name="description" content="Install Earwitness on Windows or Linux and check the install with the built-in demo.">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="bar">
+  <div class="inner">
+    <a class="brand" href="./"><img src="favicon.svg" alt="">Earwitness</a>
+    <nav aria-label="Site">
+      <a href="how-it-works.html">How it works</a>
+      <a href="protect.html">Protect your recordings</a>
+      <a href="results.html">Results</a>
+      <a href="data.html">Data sources</a>
+      <a href="install.html" aria-current="page">Install</a>
+      <a href="in-depth.html">In depth</a>
+      <a href="https://github.com/cajdata/earwitness">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <h1>Install</h1>
+  <p class="lead">Earwitness runs on 64-bit Windows 10 or 11 and on Linux. Everything runs on
+    your computer.</p>
+
+  <div class="table-wrap">
+    <table>
+      <tr><th>If you use</th><th>Install</th><th>Needs</th></tr>
+      <tr><td>Windows, and want it simple</td><td><a href="#windows">The Windows build</a> (a zip)</td><td>Nothing else</td></tr>
+      <tr><td>Windows or Linux, with Python</td><td><a href="#pypi">pipx or uv</a></td><td>Python 3.12 or newer</td></tr>
+    </table>
+  </div>
+
+  <h2 id="windows">Windows build</h2>
+  <ol>
+    <li>Download <code>earwitness-0.1.0-windows-x64.zip</code> and its <code>.sha256</code> file from the
+      <a href="https://github.com/cajdata/earwitness/releases/latest">latest release</a>.</li>
+    <li>Open PowerShell in your Downloads folder. Check the download: the two values must match.
+      <pre><code>(Get-FileHash .\earwitness-0.1.0-windows-x64.zip -Algorithm SHA256).Hash
+Get-Content .\earwitness-0.1.0-windows-x64.zip.sha256</code></pre></li>
+    <li>Unblock and extract it:
+      <pre><code>Unblock-File .\earwitness-0.1.0-windows-x64.zip
+Expand-Archive .\earwitness-0.1.0-windows-x64.zip -DestinationPath $env:USERPROFILE\Earwitness</code></pre></li>
+    <li>Run the check. It should end with <code>demo passed</code>:
+      <pre><code>cd $env:USERPROFILE\Earwitness\earwitness-0.1.0-windows-x64
+.\earwitness.exe demo</code></pre></li>
+    <li>Double-click <strong>earwitness-ui.exe</strong> in that folder to open the app. The two demo runs
+      are on its Results page.</li>
+  </ol>
+  <div class="box">
+    <h3>If Windows warns you</h3>
+    <p class="small">The build isn't code-signed, so if you skip <code>Unblock-File</code>, Windows may show
+      "Windows protected your PC". Click <strong>More info</strong>, then <strong>Run anyway</strong>. If you'd
+      rather not, install with pipx instead.</p>
+    <p class="small">The app window needs Microsoft Edge WebView2, which Windows 11 includes. Without
+      it, the app opens in your web browser and shows a small box to stop it.</p>
+  </div>
+
+  <h2 id="pypi">With pipx or uv (Windows or Linux)</h2>
+  <pre><code>pipx install earwitness
+earwitness demo</code></pre>
+  <p>With uv instead: <code>uv tool install earwitness</code>. Either way you get two commands:
+    <code>earwitness</code> for the command line, and <code>earwitness-ui</code> for the app.</p>
+  <h3>On Linux</h3>
+  <ul>
+    <li>On Debian or Ubuntu, get pipx with <code>sudo apt install pipx</code>, then
+      <code>pipx ensurepath</code>.</li>
+    <li><code>earwitness ui --browser</code> opens the app in your web browser on any desktop.</li>
+    <li>For an app window, add a toolkit: <code>pipx inject earwitness "pywebview[qt]"</code>.</li>
+    <li>Minimal systems without the expat library need <code>sudo apt install libexpat1</code>;
+      the demo's install check tells you if so.</li>
+  </ul>
+
+  <h2>Optional: ffmpeg</h2>
+  <p>With <a href="https://ffmpeg.org">ffmpeg</a> installed, Earwitness can read video and compressed
+    audio (MP4, MOV, M4A, MP3 and more) and check a file's metadata. Without it, WAV, FLAC and OGG
+    still work.</p>
+  <ul>
+    <li>Windows: <code>winget install --id Gyan.FFmpeg -e</code></li>
+    <li>Debian or Ubuntu: <code>sudo apt install ffmpeg</code></li>
+  </ul>
+
+  <h2>Disk space</h2>
+  <p>The app itself takes about 350 MB. The public data it downloads takes more, and stays in a
+    <code>data</code> folder until you delete it: about 100 MB per hour of lightning data, about 4 GB
+    to download per day of flight data, and about 40 MB per terrain tile. Set
+    <code>EARWITNESS_CACHE</code> to keep it on another drive.</p>
+
+  <h2>Uninstall</h2>
+  <ul>
+    <li>Windows build: delete the folder, and any <code>runs</code> and <code>data</code> folders Earwitness made.</li>
+    <li>pipx: <code>pipx uninstall earwitness</code>. uv: <code>uv tool uninstall earwitness</code>.</li>
+  </ul>
+
+  <p>The full guide, including building from source:
+    <a href="https://github.com/cajdata/earwitness/blob/main/docs/INSTALL.md">INSTALL.md</a>.</p>
+</main>
+
+<footer>
+  <div class="inner">
+    <p>Earwitness 0.1.0 · <a href="https://github.com/cajdata/earwitness">Source on GitHub</a> ·
+      Apache-2.0 · <a href="data.html">Data sources and credits</a></p>
+    <p>This site sets no cookies and loads no scripts, fonts or trackers.</p>
+  </div>
+</footer>
+</body>
+</html>

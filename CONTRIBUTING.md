@@ -16,7 +16,7 @@ The full spec is docs/HANDOFF.md. Read it before changing anything in src/.
 
 ## Working notes
 - Commands: `uv sync`, `uv run pytest`, `uv run ruff check .`, `uv run ruff format .`,
-  `uv run earwitness --help`.
+  `uv run earwitness --help`, `uv run earwitness demo`.
 - The CLI uses argparse (stdlib) because the handoff lists no CLI library.
 - ffmpeg is optional: needed only for `simulate ... --codec aac|mp3` and for decoding non-WAV
   input. Tests that need it skip when it is missing; CI installs it.
@@ -26,7 +26,27 @@ The full spec is docs/HANDOFF.md. Read it before changing anything in src/.
 - Repo: https://github.com/cajdata/earwitness (public). Milestone state: M0 to M5 built; M6
   (real-world validation) met its criterion on 2026-11-05 (two aircraft cases located; one
   public thunder recording located, nine documented as failures); acceptance results are in
-  docs/VALIDATION.md.
+  docs/VALIDATION.md. M7 (release v0.1.0 and the site) built on 2026-11-05: the Windows build,
+  docs/INSTALL.md, docs/COUNTERMEASURES.md, the attribution in docs/DATA_SOURCES.md, the
+  release notes in docs/release-notes/, and the site; docs/RELEASING.md has the steps.
+- `earwitness demo` is the install check: library checks on tiny files of their own (GDAL and
+  PROJ, the GLM NetCDF reader, Parquet, GEOS), then the two synthetic cases located offline.
+  Keep it offline and under a minute; the Windows build's smoke test and the clean-machine
+  check both run it. `earwitness-ui` (a pip gui-script, and `earwitness-ui.exe`) is the
+  console-less launcher in `earwitness.desktop`: it logs to `earwitness-ui.log` and, on
+  Windows, reports in message boxes. Without WebView2, GTK or Qt the UI opens in the browser.
+- Windows build: `packaging/` (PyInstaller spec, entry scripts, a rasterio hook,
+  `build_windows.py`, and the Windows Sandbox clean-machine test in `packaging/sandbox/`).
+  PyInstaller is in the `build` dependency group:
+  `uv run --group build python packaging/build_windows.py --build-ui --smoke` writes
+  `dist/windows/`. CI builds it in `.github/workflows/build-windows.yml` (manual or on a tag).
+- Site: `site/` is plain HTML and one CSS file, no build step, no scripts, nothing loaded from
+  other servers; `.github/workflows/pages.yml` deploys it to earwitness.dev after
+  `tests/test_site.py` (links, anchors, self-containment, no coordinates) passes. Main pages
+  use short plain copy; formulas and run numbers go on `in-depth.html`. Never put the place of
+  a real recording, or anything that points at one, on the site.
+- `scripts/m7_countermeasures.py` edits the demo cases (low-cut filters, AAC and MP3, cuts,
+  clocks) and searches them: the table in docs/COUNTERMEASURES.md.
 - UI: `ui/` is a Vite plus TypeScript front end (MapLibre GL JS, Plotly.js) with no framework.
   `cd ui && npm install && npm run build` writes it into `src/earwitness/server/static/`
   (gitignored, shipped in the wheel through hatch `artifacts`); CI and the release build it

@@ -1,0 +1,47 @@
+name: Windows build
+
+# The PyInstaller build of earwitness.exe and earwitness-ui.exe, smoke-tested with the frozen
+# `earwitness demo` and zipped. The release workflow calls it on a tag; run it by hand from the
+# Actions tab for a dry run, and test its `windows` artifact on a clean machine
+# (docs/RELEASING.md).
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Build the front end into the package
+        working-directory: ui
+        run: npm ci && npm run build
+
+      # runtime dependencies plus PyInstaller, without the dev group
+      - run: uv sync --locked --no-dev --group build
+
+      - name: Build, smoke-test and zip
+        run: uv run --no-sync python packaging/build_windows.py --smoke
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows
+          path: |
+            dist/windows/*.zip
+            dist/windows/*.zip.sha256
+          if-no-files-found: error

@@ -1,6 +1,8 @@
 name: Release
 
-# Publishes to PyPI through trusted publishing (OIDC). Set up on PyPI first: see docs/RELEASING.md.
+# On a version tag: build and test the wheel and sdist (Linux) and the Windows build, publish
+# to PyPI through trusted publishing once the `pypi` environment is approved, then create the
+# GitHub Release with docs/release-notes/<tag>.md and every file attached. See docs/RELEASING.md.
 on:
   push:
     tags: ["v*"]
@@ -24,18 +26,29 @@ jobs:
       - name: Build the front end into the package
         working-directory: ui
         run: npm ci && npm run build
+      - name: Check that the tag matches the version and has release notes
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1)
+          test "v$version" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME != v$version"; exit 1; }
+          test -f "docs/release-notes/$GITHUB_REF_NAME.md" || { echo "no release notes"; exit 1; }
       - run: uv sync --locked
       - run: uv run pytest
       - run: uv build
-      - name: Check that the wheel carries the front end
-        run: unzip -l dist/*.whl | grep -q "earwitness/server/static/index.html"
+      - name: Check that the wheel and the sdist carry the front end and its licences
+        run: |
+          unzip -l dist/*.whl | grep -q "earwitness/server/static/index.html"
+          unzip -l dist/*.whl | grep -q "earwitness/server/static/third-party-licenses.txt"
+          tar -tzf dist/*.tar.gz | grep -q "src/earwitness/server/static/index.html"
       - uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
 
+  windows:
+    uses: ./.github/workflows/build-windows.yml
+
   publish:
-    needs: build
+    needs: [build, windows]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -46,3 +59,27 @@ jobs:
           name: dist
           path: dist/
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: release/
+      - uses: actions/download-artifact@v8
+        with:
+          name: windows
+          path: release/
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" release/* \
+            --verify-tag \
+            --title "Earwitness ${GITHUB_REF_NAME#v}" \
+            --notes-file "docs/release-notes/$GITHUB_REF_NAME.md"

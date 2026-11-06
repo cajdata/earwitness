@@ -5,6 +5,29 @@ GOES GLM (lightning, NOAA open data) and adsb.lol globe_history (aircraft, ODbL 
 and LightningMaps are never used. Nothing is bundled: loaders download into a local cache under
 `data/`, which is gitignored.
 
+## Attribution and licences
+
+Earwitness bundles no third-party data. It downloads each source below when an analysis needs
+it, into the cache on the user's computer. When you share something made from them, such as a
+heat map, a run folder or a screenshot, keep these notices with it.
+
+| Source | Used for | Licence | Notice to keep |
+| --- | --- | --- | --- |
+| [NOAA GOES-R GLM L2 LCFA](https://registry.opendata.aws/noaa-goes/), through AWS Open Data | lightning flashes | NOAA open data, "open to the public and can be used as desired" | NOAA requests attribution: "Lightning data: NOAA GOES Geostationary Lightning Mapper (GLM)". Do not state or imply NOAA's endorsement, and do not present the cache's filtered Parquet files as unaltered NOAA data. |
+| [adsb.lol globe_history](https://www.adsb.lol/docs/open-data/historical/) | aircraft tracks | [ODbL 1.0](https://opendatacommons.org/licenses/odbl/1-0/) | "Contains information from adsb.lol, which is made available here under the Open Database License (ODbL)." A database built from it, such as the cached Parquet files if you publish them, must also be ODbL. |
+| [Copernicus DEM GLO-30](https://registry.opendata.aws/copernicus-dem/), through AWS Open Data | ground height | [Copernicus DEM licence](https://dataspace.copernicus.eu/explore-data/data-collections/copernicus-contributing-missions/collections-description/COP-DEM) (free, with attribution) | "© DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved". For results made with it: "produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved". |
+| EGM96 geoid, NGA ([`us_nga_egm96_15.tif`](https://cdn.proj.org/us_nga_README.txt) from the PROJ CDN) | ground height above the ellipsoid | public domain | none required |
+| [Natural Earth](https://www.naturalearthdata.com/about/terms-of-use/) 1:50m land | land mask for thunder | public domain | none required; "Made with Natural Earth." is welcome |
+| ICAO Doc 8643 aircraft type designators, as converted by [FlightAware dump1090](https://github.com/flightaware/dump1090) (`icao_aircraft_types.json`) | engine class (piston, turboprop, jet) | the dump1090 repository is GPL-2.0; the table was converted from ICAO's publication in 2016 | Earwitness adds 19 newer designators of its own. |
+| [OpenStreetMap](https://www.openstreetmap.org/copyright) tiles (`tile.openstreetmap.org`) | map background in the app | map data ODbL; [tile usage policy](https://operations.osmfoundation.org/policies/tiles/) | "© OpenStreetMap contributors", shown on every map. The policy forbids bulk or offline downloading and asks apps to identify themselves: the app's window sends the User-Agent `Earwitness/<version> (+https://earwitness.dev)`. Set another tile server in Setup for heavy use. |
+
+Not used: Blitzortung and LightningMaps (their terms forbid third-party apps), OpenSky (access
+limited to researchers and licensees), and MET Norway (an adapter is planned after v0.1).
+
+The software Earwitness bundles has its own licences: the front end's (MapLibre GL JS, Plotly.js)
+are in `third-party-licenses.txt` beside the built page and linked from the app's footer, and
+the Windows build carries every bundled package's licence in `THIRD_PARTY_LICENSES`.
+
 ## Loader status
 
 | Source | Module | State |
@@ -14,7 +37,7 @@ and LightningMaps are never used. Nothing is bundled: loaders download into a lo
 | adsb.lol globe_history | `earwitness.data.adsb_lol` | Done (M3). Daily release parts streamed as one tar, traces parsed, clipped to a region and day, one Parquet per day and region. |
 | Aircraft types | `earwitness.data.aircraft_types` | Done (M3). dump1090's designator table (about 2,600 types); a hand-placed ICAO DOC 8643 export takes precedence. |
 | Terrain and geoid | `earwitness.data.dem` | Done (M3). Copernicus GLO-30 tiles from AWS plus the EGM96 grid from the PROJ CDN. |
-| MET Norway Frost | | Adapter after v0.1 |
+| MET Norway Frost | | Not in v0.1; an adapter is planned |
 
 ## Cache layout
 

@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Earwitness: does your recording give away where it was made?</title>
+  <meta name="description" content="Earwitness checks whether background thunder or passing propeller planes in a recording reveal where it was made. Free, open source, runs on your own computer.">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="bar">
+  <div class="inner">
+    <a class="brand" href="./"><img src="favicon.svg" alt="">Earwitness</a>
+    <nav aria-label="Site">
+      <a href="how-it-works.html">How it works</a>
+      <a href="protect.html">Protect your recordings</a>
+      <a href="results.html">Results</a>
+      <a href="data.html">Data sources</a>
+      <a href="install.html">Install</a>
+      <a href="in-depth.html">In depth</a>
+      <a href="https://github.com/cajdata/earwitness">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <h1>Does your recording give away where it was made?</h1>
+  <p class="lead">Thunder and the drone of small planes turn up in the background of lots of
+    videos. Public records log every lightning flash and almost every plane, with the exact time
+    and place. Earwitness compares the sounds in a recording with those records to estimate where
+    it was made.</p>
+  <p>It's a free, open-source tool for checking your own recordings. It runs on your computer and
+    uploads nothing.</p>
+
+  <div class="buttons">
+    <a class="button" href="install.html">Download for Windows</a>
+    <a class="button plain" href="install.html#pypi">Install with pipx (Windows or Linux)</a>
+    <a class="button plain" href="https://github.com/cajdata/earwitness">Source code</a>
+  </div>
+  <p class="small muted">Version 0.1.0, a proof of concept. Apache-2.0 licence.</p>
+
+  <div class="box">
+    <h3>Check a recording of your own</h3>
+    <pre><code>earwitness audit my-video.mp4</code></pre>
+    <p class="small">The audit lists the location clues it hears (thunder, propeller planes, mains hum,
+      GPS and time tags) and what helps against each. The desktop app opens with the same check.</p>
+  </div>
+
+  <h2>How it works</h2>
+  <div class="grid">
+    <div class="card">
+      <h3><span class="step">1</span>Listen</h3>
+      <p>Earwitness picks out thunderclaps, or the falling whine of a propeller plane as it passes
+        overhead.</p>
+    </div>
+    <div class="card">
+      <h3><span class="step">2</span>Look up</h3>
+      <p>It downloads the public records for that day: lightning flashes seen by a NOAA weather
+        satellite, and plane tracks from adsb.lol.</p>
+    </div>
+    <div class="card">
+      <h3><span class="step">3</span>Compare</h3>
+      <p>For each possible place and start time, it works out what a microphone there would have
+        heard, and ranks the places that match the recording best.</p>
+    </div>
+  </div>
+  <p><a href="how-it-works.html">More on how it works</a></p>
+
+  <h2>How well it works</h2>
+  <div class="table-wrap">
+    <table>
+      <tr><th>Clue</th><th>Real recordings tested</th><th>When it worked</th><th>What it needs</th></tr>
+      <tr>
+        <td>Propeller planes</td>
+        <td><span class="label ok">2 of 2 located</span></td>
+        <td>About 200 m from the true spot, searching a city-sized area</td>
+        <td>Two planes passing, or one plane and the time the recording started</td>
+      </tr>
+      <tr>
+        <td>Thunder</td>
+        <td><span class="label warn">1 of 10 located</span></td>
+        <td>2.2 km from the true spot, searching a province</td>
+        <td>A few close claps, on a day with little lightning around</td>
+      </tr>
+    </table>
+  </div>
+  <p>Big storms and distant rumble defeated the thunder method, and a single common training plane
+    was not enough. <a href="results.html">See every result, failures included</a>.</p>
+
+  <h2>How to protect a recording</h2>
+  <ul>
+    <li><strong>Cut it.</strong> Cuts change the timing between sounds, and the timing is what gives the
+      place away.</li>
+    <li><strong>Remove the clock.</strong> On-screen clocks, timestamps and file metadata make the search
+      much easier.</li>
+    <li><strong>Strip the metadata.</strong> Phone videos often carry GPS coordinates, which give the
+      answer away without any of this.</li>
+    <li><strong>Don't count on filters or compression.</strong> The sounds survive both.</li>
+  </ul>
+  <p><a href="protect.html">What works and what doesn't</a></p>
+
+  <h2>Responsible use</h2>
+  <p>Earwitness exists to show that ordinary recordings leak location, to let people check their
+    own, and to document what helps. It runs no online service, downloads no videos from links,
+    and bundles no data. The project publishes no results that locate other people's
+    recordings, and asks that you use it on your own recordings.</p>
+  <p>The method was demonstrated by colsto in three YouTube videos. His code is not public, so
+    Earwitness is an independent reconstruction from those videos.</p>
+</main>
+
+<footer>
+  <div class="inner">
+    <p>Earwitness 0.1.0 · <a href="https://github.com/cajdata/earwitness">Source on GitHub</a> ·
+      Apache-2.0 · <a href="data.html">Data sources and credits</a></p>
+    <p>This site sets no cookies and loads no scripts, fonts or trackers.</p>
+  </div>
+</footer>
+</body>
+</html>

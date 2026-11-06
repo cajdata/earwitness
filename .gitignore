@@ -26,3 +26,9 @@ src/earwitness/server/static/
 Thumbs.db
 .idea/
 .vscode/
+
+# `earwitness demo` output when run from the repo root
+/earwitness-demo/
+
+# results of packaging/sandbox/start-clean-machine-test.ps1
+/sandbox-results/

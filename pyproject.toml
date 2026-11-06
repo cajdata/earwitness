@@ -1,6 +1,6 @@
 [project]
 name = "earwitness"
-version = "0.0.1"
+version = "0.1.0"
 description = "Geolocate a recording from background thunder or propeller-aircraft sound by matching it against public lightning and ADS-B records. Privacy-awareness proof of concept."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -9,7 +9,7 @@ license-files = ["LICENSE"]
 authors = [{ name = "Chris Johnson" }]
 keywords = ["audio", "geolocation", "doppler", "thunder", "lightning", "ads-b", "privacy", "osint"]
 classifiers = [
-  "Development Status :: 2 - Pre-Alpha",
+  "Development Status :: 3 - Alpha",
   "Environment :: Console",
   "Intended Audience :: Science/Research",
   "Operating System :: Microsoft :: Windows",
@@ -42,6 +42,10 @@ Issues = "https://github.com/cajdata/earwitness/issues"
 [project.scripts]
 earwitness = "earwitness.cli:main"
 
+[project.gui-scripts]
+# the desktop UI without a console window (pythonw on Windows); same options as `earwitness ui`
+earwitness-ui = "earwitness.desktop:main"
+
 [build-system]
 requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
@@ -51,7 +55,26 @@ packages = ["src/earwitness"]
 # the built front end is gitignored but belongs in the wheel; the release workflow builds it first
 artifacts = ["src/earwitness/server/static/**/*"]
 
+[tool.hatch.build.targets.sdist]
+# what the source distribution holds, listed so nothing else in a local checkout slips in
+only-include = [
+  "src",
+  "tests",
+  "docs",
+  "scripts",
+  "LICENSE",
+  "README.md",
+  "CONTRIBUTING.md",
+  "pyproject.toml",
+]
+# `uv build` makes the wheel from the sdist, so the sdist must carry the built front end too
+artifacts = ["src/earwitness/server/static/**/*"]
+
 [dependency-groups]
+build = [
+  # the Windows build (packaging/), not needed at runtime
+  "pyinstaller>=6.22",
+]
 dev = [
   "httpx>=0.28.1",
   "pytest>=8.3",

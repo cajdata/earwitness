@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>How it works · Earwitness</title>
+  <meta name="description" content="How Earwitness estimates where a recording was made from background thunder and propeller planes.">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="bar">
+  <div class="inner">
+    <a class="brand" href="./"><img src="favicon.svg" alt="">Earwitness</a>
+    <nav aria-label="Site">
+      <a href="how-it-works.html" aria-current="page">How it works</a>
+      <a href="protect.html">Protect your recordings</a>
+      <a href="results.html">Results</a>
+      <a href="data.html">Data sources</a>
+      <a href="install.html">Install</a>
+      <a href="in-depth.html">In depth</a>
+      <a href="https://github.com/cajdata/earwitness">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <h1>How it works</h1>
+  <p class="lead">Some background sounds come from events that public records log with an exact
+    time and place. If you know when and where each event happened, you can work out where a
+    microphone must have been to hear them when it did.</p>
+
+  <h2>The idea: GPS in reverse</h2>
+  <p>A GPS receiver works out where it is from the timing of signals sent by satellites at known
+    positions. Earwitness does the same with sound. The recording is the receiver. The lightning
+    flashes or planes are the satellites. Sound travels about 343 metres a second, so a clap from
+    3 km away arrives about 9 seconds after the flash.</p>
+  <p>The time the recording started is usually unknown, so Earwitness tries every start time.
+    What pins down the place is the <em>spacing</em> between the sounds, not when they happened.
+    Earwitness never tries to turn the audio into a location directly. It predicts what each
+    candidate place would have heard and checks that against the recording.</p>
+
+  <h2>Thunder</h2>
+  <p>A weather satellite, NOAA's GOES Geostationary Lightning Mapper, records lightning flashes
+    over the Americas, each with its time and position. For every candidate place on a grid,
+    Earwitness works out when each nearby flash's thunder would have arrived, and how loud it would
+    have been. It then slides that pattern along the recording's own loudness to find the best
+    fit. The best-fitting places are refined on finer grids, down to 200 m.</p>
+  <ul>
+    <li><strong>Good case:</strong> a few distinct claps from flashes within about 10 km, on a day when
+      there was little other lightning in the area searched.</li>
+    <li><strong>Hard case:</strong> a big storm. The claps blur into one long rumble that fits many places.
+      Distant thunder is just as hard: rumble from 10 to 25 km away looks a lot like rain or
+      traffic.</li>
+    <li><strong>Accuracy:</strong> a few kilometres at best. The satellite places each flash to about 3
+      to 4 km.</li>
+  </ul>
+
+  <h2>Propeller planes</h2>
+  <p>As a small propeller plane flies past, the pitch of its drone slides down: higher while it
+    comes closer, lower as it moves away. That is the Doppler effect. The shape of that slide shows
+    how fast the plane was going and how close it came. It's usually too faint to hear, but it
+    shows up clearly as a curved line on a spectrogram, a picture of the sound's pitch over time.</p>
+  <p>Most planes broadcast their position every second (ADS-B), and adsb.lol publishes those
+    tracks for every day. Earwitness first narrows the search with simple checks: is there a plane
+    with the right speed, passing at the right distance, at the right moment? It then computes the
+    exact pitch curve each remaining place would have heard from the real flight track, and scores
+    how well it lines up with the spectrogram.</p>
+  <ul>
+    <li><strong>Needs:</strong> two flyovers in the recording, or one flyover and the time the recording
+      started. You mark each flyover in the app with its trace and fit tools.</li>
+    <li><strong>Accuracy:</strong> about 100 to 200 m when it works.</li>
+    <li><strong>Hard case:</strong> one flyover by a common training plane. Several look-alike planes
+      nearby leave almost the same curve.</li>
+  </ul>
+
+  <h2>What you tell it</h2>
+  <ul>
+    <li>The recording: a local audio or video file.</li>
+    <li>The date it was made, or a range of dates (in UTC).</li>
+    <li>A rough region to search, such as a state or a metro area. Smaller is faster.</li>
+    <li>The start time, if you know it. It helps a lot.</li>
+  </ul>
+
+  <h2>What you get</h2>
+  <ul>
+    <li>A ranked list of likely places, with scores and the margin over the next best.</li>
+    <li>A heat map of how well each place fits.</li>
+    <li>For each answer, the predicted sound drawn over the recording's own, so you can see why it
+      fits.</li>
+  </ul>
+  <p>The margin over the runner-up matters more than the score itself. A close second place means
+    the answer is uncertain.</p>
+
+  <h2>Before you search: the audit</h2>
+  <p>The first thing the app does is the audit: a quick check for which clues a recording
+    contains at all. It looks for thunder, propeller flyovers, mains hum, and location or time tags
+    in the file's metadata. It also tells you what each clue could reveal and what helps
+    against it.</p>
+
+  <p><a href="in-depth.html">The formulas, pipeline and numbers are on the in-depth page.</a></p>
+</main>
+
+<footer>
+  <div class="inner">
+    <p>Earwitness 0.1.0 · <a href="https://github.com/cajdata/earwitness">Source on GitHub</a> ·
+      Apache-2.0 · <a href="data.html">Data sources and credits</a></p>
+    <p>This site sets no cookies and loads no scripts, fonts or trackers.</p>
+  </div>
+</footer>
+</body>
+</html>

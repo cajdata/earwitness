@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Data sources and credits · Earwitness</title>
+  <meta name="description" content="The public data Earwitness uses, its licences, and the credit each source asks for.">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="bar">
+  <div class="inner">
+    <a class="brand" href="./"><img src="favicon.svg" alt="">Earwitness</a>
+    <nav aria-label="Site">
+      <a href="how-it-works.html">How it works</a>
+      <a href="protect.html">Protect your recordings</a>
+      <a href="results.html">Results</a>
+      <a href="data.html" aria-current="page">Data sources</a>
+      <a href="install.html">Install</a>
+      <a href="in-depth.html">In depth</a>
+      <a href="https://github.com/cajdata/earwitness">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <h1>Data sources and credits</h1>
+  <p class="lead">Earwitness comes with no data. When an analysis needs it, the app downloads
+    public data straight from each source to your computer, and keeps it in a local folder.</p>
+  <p>If you share something made with these sources, such as a map or a screenshot of results,
+    keep the credit notices below with it.</p>
+
+  <h2>What it downloads</h2>
+  <div class="table-wrap">
+    <table>
+      <tr><th>Source</th><th>Used for</th><th>Licence</th><th>Credit</th></tr>
+      <tr>
+        <td><a href="https://registry.opendata.aws/noaa-goes/">NOAA GOES Geostationary Lightning Mapper</a>, through AWS Open Data</td>
+        <td>Lightning flashes, Americas only</td>
+        <td>NOAA open data, free to use</td>
+        <td>Lightning data: NOAA GOES Geostationary Lightning Mapper (GLM). NOAA asks for credit, and that
+          nobody imply NOAA endorses the work.</td>
+      </tr>
+      <tr>
+        <td><a href="https://www.adsb.lol/docs/open-data/historical/">adsb.lol</a> flight history</td>
+        <td>Aircraft tracks, worldwide</td>
+        <td><a href="https://opendatacommons.org/licenses/odbl/1-0/">ODbL 1.0</a></td>
+        <td>Contains information from adsb.lol, which is made available here under the Open Database
+          License (ODbL).</td>
+      </tr>
+      <tr>
+        <td><a href="https://registry.opendata.aws/copernicus-dem/">Copernicus DEM GLO-30</a>, through AWS Open Data</td>
+        <td>Ground height</td>
+        <td>Copernicus DEM licence, free with credit</td>
+        <td>© DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under
+          COPERNICUS by the European Union and ESA; all rights reserved</td>
+      </tr>
+      <tr>
+        <td>EGM96 geoid (NGA), from the <a href="https://cdn.proj.org/">PROJ</a> data server</td>
+        <td>Converting heights between GPS and sea level</td>
+        <td>Public domain</td>
+        <td>None required</td>
+      </tr>
+      <tr>
+        <td><a href="https://www.naturalearthdata.com/">Natural Earth</a></td>
+        <td>Land and sea, for the thunder search</td>
+        <td>Public domain</td>
+        <td>None required</td>
+      </tr>
+      <tr>
+        <td>ICAO aircraft type codes, as converted by <a href="https://github.com/flightaware/dump1090">FlightAware dump1090</a></td>
+        <td>Telling propeller planes from jets</td>
+        <td>From ICAO's published list; the dump1090 repository is GPL-2.0</td>
+        <td>None given</td>
+      </tr>
+      <tr>
+        <td><a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> map tiles</td>
+        <td>The map in the app</td>
+        <td>ODbL map data, <a href="https://operations.osmfoundation.org/policies/tiles/">tile usage policy</a></td>
+        <td>© OpenStreetMap contributors (shown on every map)</td>
+      </tr>
+    </table>
+  </div>
+  <p class="small muted">The full notices, including the wording for products made with the
+    terrain data, are in
+    <a href="https://github.com/cajdata/earwitness/blob/main/docs/DATA_SOURCES.md">DATA_SOURCES.md</a>.</p>
+
+  <h2>What it doesn't use</h2>
+  <ul>
+    <li><strong>Blitzortung and LightningMaps.</strong> Their terms don't allow third-party apps to pull
+      their data. Earwitness never contacts them.</li>
+    <li><strong>OpenSky Network.</strong> Its historical data is limited to researchers and licensees.</li>
+    <li><strong>MET Norway lightning.</strong> Planned for later; v0.1 covers the Americas only.</li>
+    <li><strong>Paid lightning networks</strong> (Vaisala, Earth Networks). Not included.</li>
+  </ul>
+
+  <h2>Using the map tiles fairly</h2>
+  <p>The app's map uses OpenStreetMap's free tile servers, which volunteers run for light use. The desktop
+    window identifies itself to them, and the app loads only the tiles you look at. If you need heavy use, set
+    another tile server in the app's Setup page.</p>
+
+  <h2>Software credits</h2>
+  <p>The app is built on open-source software, including NumPy, SciPy, rasterio and GDAL, xarray,
+    h5py, PyArrow, Shapely, FastAPI, pywebview, MapLibre GL JS and Plotly.js. Their licences ship
+    with the app: the Windows build includes a <code>THIRD_PARTY_LICENSES</code> folder, and the app's
+    footer links the licences of its map and chart libraries.</p>
+
+  <h2>The method</h2>
+  <p>The method comes from colsto's videos:
+    <a href="https://www.youtube.com/watch?v=SnbkIm56TfI">thunder with Blitzortung data</a>,
+    <a href="https://www.youtube.com/watch?v=6a7Z0I3LAnE">thunder with MET Norway data</a>, and
+    <a href="https://www.youtube.com/watch?v=UytYrhYLOKI">propeller-aircraft Doppler</a>.
+    His code is not public. Earwitness is an independent reconstruction from the videos, using only
+    sources whose terms allow it.</p>
+</main>
+
+<footer>
+  <div class="inner">
+    <p>Earwitness 0.1.0 · <a href="https://github.com/cajdata/earwitness">Source on GitHub</a> ·
+      Apache-2.0 · <a href="data.html">Data sources and credits</a></p>
+    <p>This site sets no cookies and loads no scripts, fonts or trackers.</p>
+  </div>
+</footer>
+</body>
+</html>

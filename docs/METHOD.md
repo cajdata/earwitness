@@ -267,3 +267,28 @@ Implementation notes that differ from or sharpen the handoff:
   `AircraftPipelineConfig.workers` (`--workers`) scores candidates in a process pool, a chunk of
   rows per task with only the flights it needs, identical to the serial scores. Sweeping all
   start-time options at once in numpy was three times slower: the arrays leave the cache.
+
+## M7 implementation notes (release)
+
+- Install check (`earwitness demo`, `earwitness.demo`): before its two synthetic cases it runs
+  each library the analyses load lazily on a small input of its own, a GeoTIFF in memory through
+  GDAL and PROJ, a GLM-like NetCDF file through `data.glm.read_glm_file`, a zstd Parquet table
+  and a buffered point through GEOS, and reports the desktop window's engine and ffmpeg. It
+  exists for the Windows build, where a module PyInstaller cannot see fails only at runtime: the
+  first build lacked rasterio's `serde` module and its GDAL and PROJ data, and only a terrain
+  run showed it. On Linux the same check found rasterio's wheel needing the system's
+  `libexpat.so.1`, which minimal images lack. With `--workers` above 1 the demo sends every
+  candidate to the process pool, which checks `multiprocessing.freeze_support` in the frozen
+  program.
+- Window fallback (`server/launch.py`): pywebview on Windows falls back to the retired
+  Internet Explorer engine when the WebView2 runtime is missing, which cannot run this front end,
+  so the launcher reads the runtime's registry entries itself (the ones pywebview reads) and
+  opens the system browser instead; on Linux it does the same when neither PyGObject nor QtPy
+  is installed, and any exception from the window falls back too. The console-less launcher
+  (`earwitness.desktop`, the `earwitness-ui` command and `earwitness-ui.exe`) writes its output
+  to `earwitness-ui.log` and holds the server with a message box while the browser shows the
+  app, since it has no console for Ctrl+C.
+- The window's User-Agent is `Earwitness/<version> (+https://earwitness.dev)`, as the
+  OpenStreetMap tile policy asks of apps using its tiles.
+- The front end's build writes `third-party-licenses.txt` (MapLibre GL JS, Plotly.js) beside
+  the page, because the minified bundle drops their notices; the footer links it.

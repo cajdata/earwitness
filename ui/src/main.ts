@@ -99,14 +99,21 @@ async function reopenRecording(): Promise<void> {
 }
 
 function footer(): HTMLElement {
+  const link = (href: string, text: string) => h("a", { href, target: "_blank", rel: "noreferrer" }, text);
   return h(
     "footer",
     {},
-    "Data: NOAA GOES GLM (open data) · adsb.lol globe_history (ODbL) · aircraft types from tar1090-db · ",
-    "terrain USGS 3DEP and Copernicus GLO-30 · land mask Natural Earth · basemap tiles ",
-    h("a", { href: "https://www.openstreetmap.org/copyright", target: "_blank", rel: "noreferrer" }, "OpenStreetMap"),
-    " contributors (ODbL, configurable in Setup). Everything runs on this computer; nothing is uploaded. ",
-    h("a", { href: "https://earwitness.dev", target: "_blank", rel: "noreferrer" }, "earwitness.dev"),
+    "Data: lightning NOAA GOES GLM (open data) · flights adsb.lol globe_history (ODbL 1.0) · ",
+    "aircraft types ICAO Doc 8643 via FlightAware dump1090 · terrain Copernicus GLO-30 © DLR e.V. 2010-2014 ",
+    "and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; ",
+    "all rights reserved · geoid EGM96 (NGA) · land mask Natural Earth · basemap © ",
+    link("https://www.openstreetmap.org/copyright", "OpenStreetMap"),
+    " contributors (configurable in Setup). Everything runs on this computer; nothing is uploaded. ",
+    link("https://earwitness.dev/data.html", "Data sources"),
+    " · ",
+    link("./third-party-licenses.txt", "Software licences"),
+    " · ",
+    link("https://earwitness.dev", "earwitness.dev"),
   );
 }
 

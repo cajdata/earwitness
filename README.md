@@ -13,7 +13,7 @@ Full specification: [docs/HANDOFF.md](docs/HANDOFF.md).
 
 ## Status
 
-Pre-alpha. Both methods run end to end on real data (GOES GLM lightning, adsb.lol flights)
+Alpha, version 0.1.0. Both methods run end to end on real data (GOES GLM lightning, adsb.lol flights)
 and pass their synthetic acceptance checks, and the desktop UI takes a recording from a file
 to a heat map for both. On real recordings (M6) the aircraft method located two of two to
 within about 200 m inside a metropolitan-sized search region, one of them a phone video, which
@@ -34,7 +34,7 @@ See [docs/VALIDATION.md](docs/VALIDATION.md).
 | M4 | Aircraft Doppler pipeline: events, funnel, scoring, outputs | done, see [docs/VALIDATION.md](docs/VALIDATION.md) |
 | M5 | Desktop UI: local API, Vite front end, native window, audit mode | done, see [docs/VALIDATION.md](docs/VALIDATION.md) |
 | M6 | Real-world validation | done: aircraft cases located, one thunder case located and nine failures documented, see [docs/VALIDATION.md](docs/VALIDATION.md) |
-| M7 | v0.1.0 release and site | planned |
+| M7 | v0.1.0 release: Windows build, install docs, countermeasures, attribution, the site | built; see [docs/release-notes/v0.1.0.md](docs/release-notes/v0.1.0.md) for the known limitations |
 
 ## Responsible use
 
@@ -46,9 +46,29 @@ own recordings, and to document what does and does not prevent it. The rules it 
   publishes no results that locate other people's recordings.
 - No hosted service, no downloading media from URLs, no bundled third-party datasets.
 - Blitzortung and LightningMaps data are never used; their terms do not allow it.
-- Countermeasures that work and do not work will be documented in `docs/COUNTERMEASURES.md`.
+- What does and does not stop the two methods is in
+  [docs/COUNTERMEASURES.md](docs/COUNTERMEASURES.md): cuts and removing the clock help;
+  filters and compression do not.
 
-## Quick start
+## Install
+
+Windows: download the zip from the [latest release](https://github.com/cajdata/earwitness/releases/latest),
+extract it and run `earwitness.exe demo`, or double-click `earwitness-ui.exe`. Windows or
+Linux with Python 3.12 or newer:
+
+```bash
+pipx install earwitness
+```
+
+```bash
+earwitness demo
+```
+
+The demo is the install check: it makes two synthetic recordings with known answers and locates
+both, offline, in under a minute. [docs/INSTALL.md](docs/INSTALL.md) has the details (checksums,
+SmartScreen, WebView2, Linux windows, ffmpeg, disk space).
+
+## Quick start from source
 
 Requires [uv](https://docs.astral.sh/uv/). ffmpeg on `PATH` is optional; it enables `--codec`
 in the simulator and decoding of non-WAV input.
@@ -59,6 +79,10 @@ uv sync
 
 ```bash
 uv run earwitness --help
+```
+
+```bash
+uv run earwitness demo
 ```
 
 Check a recording of your own for location clues. The audit report says which clues it
@@ -144,16 +168,21 @@ location. Audio is never inverted into a location directly.
 
 ## Data sources and attribution
 
-Nothing is bundled. Loaders download into a local cache (`data/`, gitignored).
+Nothing is bundled. Loaders download into a local cache (`data/`, gitignored). The notices to
+keep with anything you share are in
+[docs/DATA_SOURCES.md](docs/DATA_SOURCES.md#attribution-and-licences).
 
 | Source | Role | License |
 | --- | --- | --- |
 | [NOAA GOES GLM](https://registry.opendata.aws/noaa-goes/) | Lightning (Americas) | NOAA open data |
-| [MET Norway Frost](https://frost.met.no) | Lightning (Nordic), adapter | CC BY 4.0 / NLOD |
 | [adsb.lol globe_history](https://www.adsb.lol/docs/open-data/historical/) | Aircraft tracks | ODbL 1.0 |
-| USGS 3DEP, Copernicus GLO-30 | Terrain | Public domain; free with attribution |
+| [Copernicus DEM GLO-30](https://registry.opendata.aws/copernicus-dem/) | Terrain | Copernicus DEM licence: © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved |
+| EGM96 geoid (NGA, via the PROJ CDN) | Ellipsoid heights | Public domain |
 | Natural Earth | Land mask | Public domain |
+| ICAO Doc 8643 type designators, via FlightAware dump1090 | Engine class | Repository GPL-2.0 |
 | OpenStreetMap | Basemap tiles | ODbL; tile usage policy applies |
+
+MET Norway lightning is not in v0.1; an adapter is planned.
 
 ## Development
 
