@@ -17,9 +17,13 @@ Pre-alpha. Both methods run end to end on real data (GOES GLM lightning, adsb.lo
 and pass their synthetic acceptance checks, and the desktop UI takes a recording from a file
 to a heat map for both. On real recordings (M6) the aircraft method located two of two to
 within about 200 m inside a metropolitan-sized search region, one of them a phone video, which
-two flyovers and the phone's own clock also located from a 150 s excerpt; the thunder method
-located neither of two public field recordings made in dense storms. See
-[docs/VALIDATION.md](docs/VALIDATION.md).
+two flyovers and the phone's own clock also located from a 150 s excerpt. The thunder method
+located one of ten public recordings, an 8 minute clip with a clap 0.6 km away on a day of
+rare lightning, 2.2 km off within a province-sized region; of the other nine, two were made in
+dense storms, five in sparse ones that were mostly 10 to 25 km away or had a day of lightning
+around them in the search region, one, a security camera's single clap with no clock, fit
+almost anywhere, and one with its camera clock on screen brought the truth to sixth, 4.3 km off.
+See [docs/VALIDATION.md](docs/VALIDATION.md).
 
 | Milestone | Scope | State |
 | --- | --- | --- |
@@ -29,7 +33,7 @@ located neither of two public field recordings made in dense storms. See
 | M3 | ADS-B data: adsb.lol loader, aircraft types, terrain | done |
 | M4 | Aircraft Doppler pipeline: events, funnel, scoring, outputs | done, see [docs/VALIDATION.md](docs/VALIDATION.md) |
 | M5 | Desktop UI: local API, Vite front end, native window, audit mode | done, see [docs/VALIDATION.md](docs/VALIDATION.md) |
-| M6 | Real-world validation | done: aircraft cases located, thunder failures documented, see [docs/VALIDATION.md](docs/VALIDATION.md) |
+| M6 | Real-world validation | done: aircraft cases located, one thunder case located and nine failures documented, see [docs/VALIDATION.md](docs/VALIDATION.md) |
 | M7 | v0.1.0 release and site | planned |
 
 ## Responsible use

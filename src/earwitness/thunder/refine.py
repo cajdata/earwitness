@@ -72,14 +72,27 @@ def refine(
     model_cfg: ThunderConfig,
     refine_cfg: RefineConfig | None = None,
     progress: Progress = None,
+    offset_bounds: tuple[float, float] | None = None,
 ) -> tuple[CandidateResults, CandidateResults, CandidateResults]:
     """Refine each picked coarse region through 1 km and 200 m grids.
 
-    `observed_fine` is the observed envelope at `refine_cfg.step_s`. Returns (all stage-1
-    candidates, all stage-2 candidates, one final best per region sorted by score).
+    `observed_fine` is the observed envelope at `refine_cfg.step_s`. Each stage searches start
+    offsets around the previous stage's best, kept inside `offset_bounds` (the time prior's
+    clip-start window, Unix seconds) when given: a camera clock makes the prior seconds wide,
+    and a stage searching a minute either side would leave it. Returns (all stage-1 candidates,
+    all stage-2 candidates, one final best per region sorted by score).
     """
     refine_cfg = refine_cfg or RefineConfig()
     fine_cfg = replace(search_cfg, step_s=refine_cfg.step_s)
+
+    def window(center: float, half: float) -> tuple[float, float]:
+        lo, hi = center - half, center + half
+        if offset_bounds is not None:
+            lo, hi = max(lo, offset_bounds[0]), min(hi, offset_bounds[1])
+            if hi < lo:
+                lo = hi = min(max(center, offset_bounds[0]), offset_bounds[1])
+        return lo, hi
+
     stage1_parts: list[CandidateResults] = []
     stage2_parts: list[CandidateResults] = []
     finals: list[CandidateResults] = []
@@ -88,14 +101,12 @@ def refine(
         lat1, lon1 = local_grid(
             lat0, lon0, refine_cfg.stage1_half_extent_m, refine_cfg.stage1_spacing_m
         )
-        w1 = refine_cfg.stage1_offset_window_s
         s1 = search(
             observed_fine,
             index,
             lat1,
             lon1,
-            tau0 - w1,
-            tau0 + w1,
+            *window(tau0, refine_cfg.stage1_offset_window_s),
             fine_cfg,
             model_cfg,
             "refine-1km",
@@ -108,15 +119,13 @@ def refine(
             refine_cfg.stage2_half_extent_m,
             refine_cfg.stage2_spacing_m,
         )
-        w2 = refine_cfg.stage2_offset_window_s
         tau1 = float(b1.offset_unix[0])
         s2 = search(
             observed_fine,
             index,
             lat2,
             lon2,
-            tau1 - w2,
-            tau1 + w2,
+            *window(tau1, refine_cfg.stage2_offset_window_s),
             fine_cfg,
             model_cfg,
             "refine-200m",

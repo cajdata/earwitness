@@ -24,8 +24,9 @@ The full spec is docs/HANDOFF.md. Read it before changing anything in src/.
   confirmed on 2026-11-03: Apache-2.0, CI on Windows plus Linux, local web UI, no global search
   in the UI, no Blitzortung adapter, no helicopters in v0.1.
 - Repo: https://github.com/cajdata/earwitness (public). Milestone state: M0 to M5 built; M6
-  (real-world validation) met its criterion on 2026-11-05 (two aircraft cases located, two
-  thunder cases documented as failures); acceptance results are in docs/VALIDATION.md.
+  (real-world validation) met its criterion on 2026-11-05 (two aircraft cases located; one
+  public thunder recording located, nine documented as failures); acceptance results are in
+  docs/VALIDATION.md.
 - UI: `ui/` is a Vite plus TypeScript front end (MapLibre GL JS, Plotly.js) with no framework.
   `cd ui && npm install && npm run build` writes it into `src/earwitness/server/static/`
   (gitignored, shipped in the wheel through hatch `artifacts`); CI and the release build it
@@ -56,4 +57,8 @@ The full spec is docs/HANDOFF.md. Read it before changing anything in src/.
   `m6_truth_check.py` (when a case fails: which flights passed the true site and how it scores
   by hand with them; every M6 bug was a measurement or convention problem it exposed),
   `m6_clip_sweep.py` (cut excerpts around the flyovers and run known-time searches on them:
-  how short a clip can be, with the analyst's trace cut to each excerpt or re-traced).
+  how short a clip can be, with the analyst's trace cut to each excerpt or re-traced),
+  `m6_thunder_shortlist.py` (public radio aporee recordings of thunder on the Internet Archive
+  with a published position inside GLM coverage and an open licence, rated from sampled GLM
+  files by how sparse and how near the storm was at the stated time; its output carries
+  positions, so it goes under `data/`).

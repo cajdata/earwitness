@@ -313,7 +313,15 @@ def analyze_thunder(
     if cfg.do_refine and picks.size:
         t0 = time.perf_counter()
         stage1, stage2, final = refine(
-            fine_obs.values, index, coarse, picks, cfg.search, cfg.model, cfg.refine, log.log
+            fine_obs.values,
+            index,
+            coarse,
+            picks,
+            cfg.search,
+            cfg.model,
+            cfg.refine,
+            log.log,
+            offset_bounds=(t_start, t_end),
         )
         stages.extend([stage1, stage2, final])
         log.log(f"refinement of {picks.size} regions took {time.perf_counter() - t0:.1f} s")

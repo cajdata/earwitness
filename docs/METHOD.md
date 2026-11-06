@@ -37,7 +37,9 @@ Implementation notes that differ from or sharpen the handoff:
   the per-window energy. The score is the cosine, with the best three offsets kept.
 - Refinement: the top regions (greedy, at least 15 km apart) are re-searched on a 1 km grid
   within 5 km with offsets within 60 s at 1 s, then on a 200 m grid within 1 km with offsets
-  within 10 s.
+  within 10 s, both kept inside the time prior's clip-start window (`refine(...,
+  offset_bounds)`): a camera clock makes that window seconds wide, and until M6's third pass the
+  refinement searched a minute either side of it.
 - Bearing-diversity weighting (off by default): strikes are binned into eight bearing sectors
   around the candidate and weighted by (mean count / sector count)^strength, so an isolated
   direction counts more than a crowded one.
@@ -81,10 +83,11 @@ Implementation notes that differ from or sharpen the handoff:
   and the tubes are only laid near each hint, so a single hint per pair would search the wrong
   place, and stopping at 100000 hints in flight-index order, which the run log reports when it
   happens); distance tubes laid across each flight at the lattice spacing between the lateral
-  offsets the distance range allows for the aircraft's height above ground, checked with the
-  exact closest approach of the 1 s track over the segment near the hint (or inside the
-  known-time window), so a long leg costs little per hint and a leg that passes the same place
-  twice answers with the pass in question; timing join on cell ids with the gap tolerance;
+  offsets the distance range allows for the aircraft's height above ground, each cell checked
+  with the exact closest approach of the 1 s track on the pass that laid it (in M4, the track's
+  nearest sample over the segment near the hint or inside the known-time window, which for
+  pattern traffic answered with whichever circuit passed nearest; see the M6 notes); timing
+  join on cell ids with the gap tolerance;
   silence filter counting
   other admitted flights whose slant range from the candidate (aircraft height against the
   candidate's ground height) drops under 4 km while the recording was silent, judged at the
@@ -218,9 +221,32 @@ Implementation notes that differ from or sharpen the handoff:
   with honest speed ranges). The old mode stays as `FunnelConfig(prefilter="gap")`.
 - Narrow tube and exact check (`funnel.pair_cells`): per hint only the event with the narrower
   distance band at its flight's speed is laid on the lattice, and its cells are checked against
-  the other flight's exact closest approach, so the wide tube of a distant fast aircraft is
-  never laid; the nearest track sample comes from a k-d tree, hints run in spatial order, the
-  1 s track cache is bounded, and the prefilter queries run in chunks with array reduction.
+  the other flight's closest approach on the pass heard when each cell's implied start says it
+  must have been, so the wide tube of a distant fast aircraft is never laid; hints run in
+  spatial order, the 1 s track cache is bounded, and the prefilter queries run in chunks with
+  array reduction.
+- Passes: an aircraft in a traffic pattern passes the same place every few minutes, on the near
+  leg, the far leg and the turns, and only one of those passes was heard. The funnel took each
+  cell's closest approach at the track's nearest sample, so a cell kept only the nearest pass:
+  an event heard on the far leg failed the distance band at the near leg's distance, and one
+  heard on a later circuit took the timing of whichever circuit flew nearest. Each laid cell now
+  walks along the track from the sample that laid it to the closest approach of that pass
+  (`funnel.descend_to_pass`), one row per cell and pass, and the other flight's pass is the
+  nearest local minimum of distance among the samples whose sound arrives inside the window the
+  narrow event's start allows (`funnel.heard_pass`); single-event mode uses the walk inside the
+  known-time window. Both move or search four samples at a time before the 1 s polish
+  (`funnel.PASS_STRIDE`): two passes of one point lie tens of seconds apart at the least, while
+  ADS-B jitter dents the distance with minima a few seconds apart, which a walk one sample at a
+  time stops at and a search of every sample takes for a pass. `cpa_to_points` (nearest sample
+  overall) stays for the scripts' truth checks.
+- Duplicates: a hint lays its tube within three reaches of its meeting place, wider than the
+  coarse cells that tell meeting places apart, so the hints of one pair overlap and find the
+  same cells again; about half of every two-event search's rows were such repeats, each scored
+  and silence-checked anew. The funnel now returns one row per cell, flight pair and recording
+  start to the second (`funnel.unique_hypotheses`); rows of one cell and pair with different
+  starts, pattern traffic heard on another circuit, stay. The silence filter queries its
+  neighbours in blocks of 2,000 candidates (`funnel.SILENCE_CHUNK`): the hit lists of every
+  candidate at once reached tens of gigabytes beside busy airports.
 - Clock: a known start bounds every flyover the clip can hold, so the pipeline admits only
   flights airborne within the clip, give or take the clock tolerance and two minutes
   (`pipeline.flight_window`), before the funnel; with two events it also keeps only candidates

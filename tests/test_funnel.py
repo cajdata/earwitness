@@ -172,6 +172,39 @@ def _site_candidate():
     )  # fmt: skip
 
 
+def _rows(cell, f1, f2, t_start):
+    n = len(cell)
+    z = np.zeros(n)
+    return fn.Candidates(
+        cell=np.asarray(cell, np.int64), lat=z + SITE[0], lon=z + SITE[1],
+        f1=np.asarray(f1, np.int64), f2=np.asarray(f2, np.int64), heard1=z, heard2=z,
+        slant1=z, slant2=z, t_start=T0 + np.asarray(t_start, float),
+    )  # fmt: skip
+
+
+def test_unique_hypotheses_keep_one_row_per_cell_pair_and_start():
+    # rows 1 and 3 repeat row 0 (one exactly, one 0.4 s later, as overlapping hints find them);
+    # row 2 is the same cell and pair on another circuit, 208 s later; row 4 another pair
+    cand = _rows([7, 7, 7, 7, 7], [0, 0, 0, 0, 2], [1, 1, 1, 1, 1], [10.0, 10.0, 218.0, 10.4, 10.0])
+    out = fn.unique_hypotheses(cand)
+    assert out.t_start.tolist() == [T0 + 10.0, T0 + 218.0, T0 + 10.0]
+    assert out.f1.tolist() == [0, 0, 2]
+    assert len(fn.unique_hypotheses(fn.Candidates.empty())) == 0
+
+
+def test_silence_hits_in_chunks_match_one_query(monkeypatch):
+    cfg = fn.FunnelConfig()
+    f1 = _flight("aaa111", 70.0, 90.0, 400.0, 300.0, 600.0)
+    intruder = _flight("bbb222", 70.0, 0.0, 400.0, 1000.0, 200.0)
+    fs, _ = _flight_set([f1, intruder], cfg)
+    cand = _rows(list(range(5)), [0] * 5, [-1] * 5, [0.0, 50.0, -100.0, 400.0, 0.0])
+    windows = [SilenceWindow(100.0, 300.0)]
+    whole = fn.silence_hits(fs, cand, windows, cfg)
+    monkeypatch.setattr(fn, "SILENCE_CHUNK", 2)
+    assert fn.silence_hits(fs, cand, windows, cfg).tolist() == whole.tolist()
+    assert whole.sum() > 0
+
+
 def test_silence_hits_use_slant_range_not_ground_distance():
     cfg = fn.FunnelConfig()
     f1 = _flight("aaa111", 70.0, 90.0, 400.0, 300.0, 600.0)
@@ -286,6 +319,180 @@ def test_pair_cells_lay_the_narrow_tube_and_agree_with_the_two_tube_join():
         if len(new):
             found |= bool(geodesy.horizontal_distance(new.lat, new.lon, *SITE).min() < 150.0)
     assert found
+
+
+def _out_and_back():
+    """Out east 600 m north of the origin, back west 150 m north of it, 300 m up, at 40 m/s:
+    two passes of the origin, at 100 s (slant 670.8 m) and 400 s (335.4 m)."""
+    t = np.arange(0.0, 500.0, 1.0)
+    out = t < 250.0
+    x = np.where(out, 40.0 * (t - 100.0), 6000.0 - 40.0 * (t - 250.0))
+    y = np.where(out, 600.0, 150.0)
+    return t, np.column_stack([x, y, np.full(t.size, 300.0)])
+
+
+def test_descend_to_pass_answers_with_the_pass_through_its_start():
+    t, track = _out_and_back()
+    pts = np.zeros((2, 3))
+    t_cpa, slant, j = fn.descend_to_pass(track, t, pts, np.array([90, 410]))
+    np.testing.assert_allclose(t_cpa, [100.0, 400.0], atol=1e-6)
+    np.testing.assert_allclose(slant, [np.hypot(600.0, 300.0), np.hypot(150.0, 300.0)], atol=1e-6)
+    assert j.tolist() == [100, 400]
+    # the nearest sample overall answers with the nearer pass only
+    t_all, _ = fn.cpa_to_points(track, t, pts)
+    np.testing.assert_allclose(t_all, [400.0, 400.0], atol=1e-6)
+
+
+def test_descend_to_pass_walks_past_jitter_dents_to_the_closest_approach():
+    # a straight pass 2,600 m abeam at 50 m/s with 3 m of sideways jitter every 3 s: within
+    # about 5 s of closest approach the jitter dents the distance with small minima (at -3, -1,
+    # 2 and 5 s), and a walk one sample at a time from 20 s out stops at the first, 4.6 s early
+    t = np.arange(-120.0, 121.0, 1.0)
+    jitter = 3.0 * np.sin(2.0 * np.pi * t / 3.0)
+    track = np.column_stack([50.0 * t, 2600.0 + jitter, np.zeros(t.size)])
+    pts = np.zeros((1, 3))
+    t1, _, _ = fn.descend_to_pass(track, t, pts, np.array([140]), stride=1)
+    t4, s4, _ = fn.descend_to_pass(track, t, pts, np.array([140]))
+    assert t1[0] > 4.0
+    assert abs(t4[0]) < 1.5
+    assert abs(s4[0] - 2600.0) < 5.0
+
+
+def test_heard_pass_finds_the_pass_heard_inside_each_window():
+    t, track = _out_and_back()
+    pts = np.zeros((4, 3))
+    # heard at 100 + 670.8 / 343 = 101.96 s and 400 + 335.4 / 343 = 400.98 s; in [200, 230]
+    # the aircraft only recedes, and in [380, 395] it is still closing on its second pass
+    lo = np.array([95.0, 395.0, 200.0, 380.0])
+    hi = np.array([110.0, 405.0, 230.0, 395.0])
+    t_cpa, slant, found = fn.heard_pass(track, t, pts, lo, hi, 343.0, 10000.0)
+    assert found.tolist() == [True, True, False, False]
+    np.testing.assert_allclose(t_cpa[:2], [100.0, 400.0], atol=1e-6)
+    np.testing.assert_allclose(
+        slant[:2], [np.hypot(600.0, 300.0), np.hypot(150.0, 300.0)], atol=1e-6
+    )
+    assert fn.heard_pass(track, t, np.zeros((0, 3)), lo[:0], hi[:0], 343.0, 1e4)[2].size == 0
+
+
+def _racetrack_flight(icao, speed, height, y_near, y_far, length, circuits, drift=0.0, step=4.0):
+    """A pattern flown `circuits` times from T0: an eastbound leg `y_near` m north of the site,
+    a westbound leg at `y_far`, semicircle turns between them, the whole circuit moving `drift`
+    m north each time round. The legs cross the site's meridian `length` / 2 into each leg."""
+    r = 0.5 * (y_far - y_near)
+    yc = 0.5 * (y_far + y_near)
+    half = 0.5 * length
+    perimeter = 2.0 * length + 2.0 * np.pi * r
+    t = np.arange(0.0, circuits * perimeter / speed, step)
+    s = (speed * t) % perimeter
+    x = np.empty_like(s)
+    y = np.empty_like(s)
+    legs = [length, length + np.pi * r, 2.0 * length + np.pi * r]
+    a = s < legs[0]
+    b = (s >= legs[0]) & (s < legs[1])
+    c = (s >= legs[1]) & (s < legs[2])
+    d = s >= legs[2]
+    x[a], y[a] = -half + s[a], y_near
+    th = (s[b] - legs[0]) / r
+    x[b], y[b] = half + r * np.sin(th), yc - r * np.cos(th)
+    x[c], y[c] = half - (s[c] - legs[1]), y_far
+    th = (s[d] - legs[2]) / r
+    x[d], y[d] = -half - r * np.sin(th), yc + r * np.cos(th)
+    y = y + drift * speed * t / perimeter
+    tr = am.Track(t, np.column_stack([x, y, np.full(t.size, height)]))
+    lat, lon, h = tr.to_geodetic(*SITE, 0.0)
+    return Flight(
+        icao, 0, "C172", "", "piston", T0 + t, lat, lon, h, np.full(t.size, speed), "geometric"
+    )
+
+
+CIRCUIT_S = (2 * 3000.0 + 2 * np.pi * 700.0) / 50.0
+"""One time round the test pattern: 3 km legs 1,400 m apart at 50 m/s, 208 s."""
+
+
+def _assert_site_found(cand, d_slant1):
+    d = geodesy.horizontal_distance(cand.lat, cand.lon, *SITE)
+    assert d.size
+    assert d.min() < 150.0
+    at = d < 150.0
+    assert set(zip(cand.f1[at].tolist(), cand.f2[at].tolist(), strict=True)) <= {(0, 1), (0, -1)}
+    assert np.all(np.abs(cand.t_start[at] - T0) < 10.0)
+    assert np.all(np.abs(cand.slant1[at] - d_slant1) < 150.0)
+
+
+def test_a_pattern_aircraft_heard_on_its_far_leg_is_found():
+    # the near leg passes 424 m from the site, the far leg 1,726 m; the event was heard on the
+    # far leg of the third circuit, so the site's nearest pass is not the one heard, and is
+    # outside the event's distance band
+    cfg = fn.FunnelConfig()
+    pattern = _racetrack_flight("aaa111", 50.0, 300.0, 300.0, 1700.0, 3000.0, 5)
+    t_far = (3000.0 + np.pi * 700.0 + 1500.0) / 50.0 + 2 * CIRCUIT_S
+    d_far = float(np.hypot(1700.0, 300.0))
+    e1 = _event("e1", t_far + d_far / 343.0, 110.0, 50.0, d_far)
+    # a partner with a narrower band (its tube is laid, the pattern's pass is found in time) and
+    # one with a wider band (the pattern's tube is laid, each cell on the pass that laid it)
+    for lateral, height in ((400.0, 400.0), (3000.0, 500.0)):
+        other = _flight("bbb222", 70.0, 200.0, height, lateral, 700.0)
+        fs, lattice = _flight_set([pattern, other], cfg)
+        d2 = float(np.hypot(lateral, height))
+        e2 = _event("e2", 700.0 + d2 / 343.0, 95.0, 70.0, d2)
+        cand, _ = fn.two_event_candidates(fs, e1, e2, EventSet([e1, e2]).gap(), lattice, cfg)
+        _assert_site_found(cand, d_far)
+    # known-time mode: the clock picks the third circuit, and its far leg is the pass heard
+    fs, lattice = _flight_set([pattern], cfg)
+    _assert_site_found(fn.single_event_candidates(fs, e1, T0, 1.0, lattice, cfg), d_far)
+
+
+def test_pair_cells_agree_with_the_two_tube_join_on_pattern_traffic():
+    # both tubes laid pass by pass and joined on the gap (the reference) against the narrow tube
+    # and the other flight's pass found by time: every row of the join is found, with the same
+    # heard times, and every pair_cells row satisfies the join's own timing condition
+    cfg = fn.FunnelConfig()
+    pattern = _racetrack_flight("aaa111", 50.0, 300.0, 300.0, 1700.0, 3000.0, 5)
+    t_far = (3000.0 + np.pi * 700.0 + 1500.0) / 50.0 + 2 * CIRCUIT_S
+    d_far = float(np.hypot(1700.0, 300.0))
+    e1 = _event("e1", t_far + d_far / 343.0, 110.0, 50.0, d_far)
+    other = _flight("bbb222", 70.0, 200.0, 500.0, 3000.0, 700.0)
+    d2 = float(np.hypot(3000.0, 500.0))
+    e2 = _event("e2", 700.0 + d2 / 343.0, 95.0, 70.0, d2)
+    fs, lattice = _flight_set([pattern, other], cfg)
+    gap = EventSet([e1, e2]).gap()
+    hints = fn.pair_prefilter(fs, e1, e2, gap, cfg)
+    assert hints
+    radius = 3.0 * fn.pair_reach(e1, e2, cfg)
+
+    def rows(c):
+        return {(int(a), round(float(h1), 3), round(float(h2), 3))
+                for a, h1, h2 in zip(c.cell, c.heard1, c.heard2, strict=True)}  # fmt: skip
+
+    for hint in hints:
+        tube1 = fn.tube_cells(fs, hint.f1, e1, lattice, cfg, None, hint.xy, radius)
+        tube2 = fn.tube_cells(fs, hint.f2, e2, lattice, cfg, None, hint.xy, radius)
+        joined = fn.timing_join(tube1, tube2, e1, gap, cfg)
+        new = fn.pair_cells(fs, hint, e1, e2, lattice, cfg, None, radius)
+        assert len(joined) > 0
+        assert rows(joined) <= rows(new)
+        diff = new.heard2 - new.heard1
+        assert np.all(np.abs(diff - gap.mid) <= gap.half_width + cfg.timing_tolerance_s + 1e-6)
+
+
+def test_a_pattern_aircraft_is_paired_on_the_circuit_that_was_heard():
+    # the circuit drifts 40 m north each time round, so the site's nearest pass is the first
+    # circuit's near leg (428 m); the event was heard on the fourth circuit's (521 m), and only
+    # that one agrees in time with the other flight
+    cfg = fn.FunnelConfig()
+    pattern = _racetrack_flight("aaa111", 50.0, 300.0, 300.0, 1700.0, 3000.0, 5, drift=40.0)
+    t_near = 1500.0 / 50.0 + 3 * CIRCUIT_S
+    lateral1 = 300.0 + 40.0 * t_near / CIRCUIT_S
+    d1 = float(np.hypot(lateral1, 300.0))
+    e1 = _event("e1", t_near + d1 / 343.0, 110.0, 50.0, d1)
+    t2 = t_near + 150.0
+    for lateral, height in ((400.0, 400.0), (150.0, 300.0)):
+        other = _flight("bbb222", 70.0, 200.0, height, lateral, t2)
+        fs, lattice = _flight_set([pattern, other], cfg)
+        d2 = float(np.hypot(lateral, height))
+        e2 = _event("e2", t2 + d2 / 343.0, 95.0, 70.0, d2)
+        cand, _ = fn.two_event_candidates(fs, e1, e2, EventSet([e1, e2]).gap(), lattice, cfg)
+        _assert_site_found(cand, d1)
 
 
 def test_a_profiled_event_narrows_the_tube_to_the_flights_speed():

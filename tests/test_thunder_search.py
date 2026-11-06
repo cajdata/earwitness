@@ -7,6 +7,7 @@ from earwitness.core import geodesy
 from earwitness.data.adapters import LightningEvents
 from earwitness.thunder import search as ts
 from earwitness.thunder.model import ThunderConfig, kernel_peak_time
+from earwitness.thunder.refine import RefineConfig, refine
 
 T0 = 1.8e9
 
@@ -152,3 +153,25 @@ def test_sliding_score_dispatch():
     np.testing.assert_allclose(ts.sliding_score(o, m, "pearson"), ts.sliding_pearson(o, m))
     with pytest.raises(ValueError, match="score mode"):
         ts.sliding_score(o, m, "euclid")
+
+
+def test_refinement_stays_inside_the_time_prior():
+    # the clip truly starts at T0, but a camera clock (read wrongly here) says T0 + 28 to T0 + 32:
+    # refinement must not search a minute either side and walk out of the prior to T0
+    lat0, lon0 = 35.0, -97.0
+    events = _events_around(
+        lat0, lon0, [(30.0, 20.0, 6000.0), (90.0, 100.0, 12000.0), (150.0, 250.0, 9000.0)]
+    )
+    index = ts.StrikeIndex(events)
+    cfg = ThunderConfig()
+    scfg = ts.SearchConfig(step_s=5.0)
+    fine, _ = ts.render_models(index, [lat0], [lon0], T0, 1.0, 300, cfg, ts.SearchConfig())
+    lo, hi = T0 + 28.0, T0 + 32.0
+    coarse = ts.search(fine[0][::5], index, np.array([lat0]), np.array([lon0]), lo, hi, scfg, cfg)
+    assert lo <= coarse.offset_unix[0] <= hi
+    picks = np.array([0])
+    rc = RefineConfig()
+    _, _, free = refine(fine[0], index, coarse, picks, scfg, cfg, rc)
+    _, _, kept = refine(fine[0], index, coarse, picks, scfg, cfg, rc, offset_bounds=(lo, hi))
+    assert abs(free.offset_unix[0] - T0) <= 1.0  # unbounded, it walks to the true start
+    assert lo <= kept.offset_unix[0] <= hi

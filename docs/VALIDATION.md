@@ -43,6 +43,23 @@ around a point and its busiest half hour, which picks the hour of a webcam archi
 | personal-1, two events, known time +-2 s, metro box, flights limited to the clip window | aircraft two-event pair | 190 | 1 (200 m) | 17.53, margin 12.32 | +0.5 | 4 of 147 (coarse; nearest 93 m) | flights 92, pairs 5919, candidates 147 | 86 |
 | thunder-1, public field recording (30 min, rural night), state-sized box, local date | thunder | 479316 | none (5 km) | 0.842, margin 0.000 | n/a | none of 10 (final; nearest 29928 m) | grid 46057, on_land 44257, prefilter 36089 | 51 |
 | thunder-2, public field recording (60 min, front porch), state-sized box, one day | thunder | 73170 | none (5 km) | 0.788, margin 0.031 | n/a | none of 10 (final; nearest 55377 m) | grid 8721, prefilter 4000 | 20 |
+| colsto, metro region, run 5 (third pass: every pass, repeats dropped, 12 scoring processes) | aircraft two-event pair | 173 | 1 (200 m) | 19.88, margin 1.61 | +0.4 | 1 of 129236 (coarse; nearest 55 m) | flights 3549, pairs 44480, candidates 129236 | 546 |
+| personal-1, two events, known time +-2 s, metro box, every pass | aircraft two-event pair | 190 | 1 (200 m) | 17.53, margin 3.33 | +0.5 | 2 of 99 (coarse; nearest 93 m) | flights 92, pairs 2769, candidates 99 | 65 |
+| personal-1, two events (PC-12 re-traced), metro box, no clock, previous funnel | aircraft two-event pair | 46385 | none (200 m) | 19.81, margin 0.18 | -23826.5 | 1093 of 256778 (coarse; nearest 93 m) | flights 1859, pairs 68760, candidates 256778 | 1061 |
+| personal-1, two events (PC-12 re-traced), metro box, no clock, every pass | aircraft two-event pair | 46281 | none (200 m) | 19.63, margin 0.00 | -19149.4 | 1031 of 173627 (coarse; nearest 93 m) | flights 1859, pairs 68760, candidates 173627 | 849 |
+| personal-1, known time +-2 s, metro box, every pass | aircraft single-event known-time | 11510 | 5 (200 m) | 16.00, margin 0.02 | -0.5 | 27 of 1289 (coarse; nearest 93 m) | flights 92, candidates 1289 | 79 |
+| thunder-3, public field recording (19 min, city window, rain), state-sized box, a day around the stated start | thunder | 439172 | none (5 km) | 0.837, margin 0.000 | n/a | none of 10 (final; nearest 74639 m) | grid 22327, on_land 20039, prefilter 5242 | 14 |
+| thunder-4, public field recording (18 min, stream and road), state-sized box, a day | thunder | 74343 | none (5 km) | 0.746, margin 0.019 | n/a | none of 10 (final; nearest 6513 m) | grid 10790, prefilter 1387 | 6 |
+| thunder-5, the same storm 13 min later (13 min, 3 loudness peaks), state-sized box, a day | thunder | 23028 | none (5 km) | 0.936, margin 0.001 | n/a | none of 10 (final; nearest 23028 m) | grid 10790, prefilter 1922 | 6 |
+| thunder-6, public field recording (80 min, in a tent), state-sized box, a day | thunder | 142297 | none (5 km) | 0.625, margin 0.023 | n/a | none of 10 (final; nearest 142297 m) | grid 9327, on_land 8271, prefilter 6735 | 24 |
+| thunder-7, public field recording (55 min, shoreline park, date in doubt), state-sized box, a day | thunder | 330090 | none (5 km) | 0.760, margin 0.002 | n/a | none of 10 (final; nearest 179481 m) | grid 9327, on_land 8271, prefilter 6993 | 21 |
+| thunder-8, public field recording (8 min, city window, hail), province-sized box, a day | thunder | 2172 | 1 (5 km) | 0.928, margin 0.084 | n/a | 1 of 10 (final; nearest 2172 m) | grid 85155, on_land 56689, prefilter 106 | 6 |
+| thunder-8, the same clip over western North America, a day | thunder | 2076 | 1 (5 km) | 0.927, margin 0.000 | n/a | 1 of 10 (final; nearest 2076 m) | grid 415872, on_land 255021, prefilter 1414 | 11 |
+| thunder-9, a security camera's clip of a strike next door, from a news upload (30 s, one clap, no clock), state-sized box, the reported time +-1 h | thunder | 53178 | none (5 km) | 0.999, margin 0.000 | n/a | none of 10 (final; nearest 18328 m) | grid 10790, prefilter 2141 | 4 |
+| thunder-9, the same strike on the same house's doorbell camera (21 s) | thunder | 381207 | none (5 km) | 0.984, margin 0.000 | n/a | none of 10 (final; nearest 41992 m) | grid 10790, prefilter 1786 | 4 |
+| thunder-10, a security camera's clip of a storm over a published street, its clock on screen: 25 s of real time, two claps, state-sized box, the clock +-3 s | thunder | 67447 | none (5 km) | 0.986, margin 0.002 | n/a | none of 10 (final; nearest 23069 m) | grid 10790, prefilter 677 | 2 |
+| thunder-10, 110 s of the same storm, five claps, its clock gaining 7% on the video, the clock +-3 s | thunder | 32827 | 6 (5 km) | 0.924, margin 0.007 | n/a | 6 of 10 (final; nearest 4310 m) | grid 10790, prefilter 1212 | 3 |
+| thunder-10, the same 110 s stretched to the clock's length | thunder | 209215 | none (5 km) | 0.944, margin 0.029 | n/a | none of 10 (final; nearest 7461 m) | grid 10790, prefilter 1227 | 3 |
 
 Run 2 is the reference case solved: the two flyovers measured with the project's own trace
 and fit tools, searched blind over a 1.8 by 1.0 degree box around the metropolitan area the
@@ -356,6 +373,186 @@ the flights it needs, with scores identical to the serial ones: 244,711 candidat
 12 processes, 0.65 ms a candidate of wall time against 9.1 ms on one core (run 2 scored 355,189
 in 54 minutes). The reference search over the metro box now takes 8.5 minutes instead of 73,
 with the same answer.
+
+### Third pass, 2026-11-05: pattern traffic in the funnel, and a sparse-storm shortlist
+
+**Pattern traffic.** The funnel took each candidate cell's closest approach to a flight at the
+track's nearest sample (a k-d tree over the track segment near the hint), so a cell kept only
+the nearest of the flight's passes. An aircraft in a traffic pattern passes a place every few
+minutes, on the near leg, the far leg and the turns, and only one of those passes was heard: an
+event heard on the far leg failed the distance band at the near leg's distance, and one heard on
+a later circuit took the timing of whichever circuit flew nearest. A synthetic racetrack (3 km
+legs 1.4 km apart at 50 m/s, flown five times) shows both. Heard on the third circuit's far leg,
+1,726 m from the site while the near leg passes 424 m away, the site was lost in two-event mode
+with a partner of narrower or wider band and in known-time mode; heard on the fourth circuit of
+a circuit drifting 40 m a lap, it was lost in two-event mode with either partner. Each laid cell
+now walks along the track from the sample that laid it to the closest approach of that pass
+(`funnel.descend_to_pass`), one row per cell and pass, and the other flight's pass is the
+nearest local minimum of distance among the samples whose sound arrives inside the window the
+narrow event's implied start allows (`funnel.heard_pass`). Both move four samples at a time
+before a 1 s polish: two passes of one point lie tens of seconds apart at the least, while ADS-B
+jitter dents the distance with minima a few seconds apart. A walk one sample at a time stopped
+at such a dent 4.6 s short of a test pass's closest approach (0.7 s with the coarse walk), and a
+search of every sample took dents for passes: in 600 sampled hints of the reference search it
+accepted 28 such candidates, an aircraft receding at 2.6 km whose real closest approach was
+heard 10 s before the window, which the coarse search and the old funnel both reject. On the
+reference case's real tracks the tubes hold 1.04 rows per cell, and 90% of the extra rows are
+passes a minute or more apart; per hint the funnel costs what it did (6.0 s against 5.9 s for
+those 600 hints) and keeps 4% more candidates.
+
+**Repeats.** The rerun showed what the hint layout had always cost: a hint lays its tube within
+three reaches of its meeting place, wider than the coarse cells that tell meeting places apart,
+so the hints of one pair overlap and find the same cell, pair and start again. About half of
+every two-event search's rows were such repeats (52% of the M4 case 4 rows after the silence
+filter, 54% of personal-1's no-clock search), each scored and silence-checked anew, and the
+"candidates", "after silence" and "truth cells kept" columns of the M4 tables count them. The
+funnel now returns one row per cell, pair and start to the second (`funnel.unique_hypotheses`),
+and the silence filter queries its neighbours 2,000 candidates at a time: on the M4 case with
+the most pattern traffic, whose rows doubled with the pass fix, the filter took 8 minutes
+instead of 44 s while the harness process grew to 49 GB, and takes 41 s with both changes.
+
+**M4 rerun.** Both harnesses rerun on the final code, with the commands of the M4 section.
+Single-event mode: 10 of 10 first within 200 m, every rank-1 error and margin as before, 0.2 to
+10% more candidates and as many distinct cells of the true flight within 300 m of the site or
+more (case 7: 4 to 7, case 10: 4 to 5), 8 min 30 s in all. Two-event mode, 10 of 10 again,
+before (second pass) and after, counting distinct hypotheses and cells for both:
+
+| case | rank-1 error (m), before / after | margin (dB) | distinct hypotheses after silence | distinct truth cells | runtime (s) |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 19 / 19 | 5.83 / 5.83 | 3,021 / 4,398 | 4 / 4 | 155 / 99 |
+| 2 | 12 / 12 | 4.85 / 4.85 | 1,049 / 2,148 | 4 / 4 | 84 / 71 |
+| 3 | 14 / 14 | 7.47 / 7.47 | 978 / 1,577 | 5 / 5 | 93 / 70 |
+| 4 | 11 / 11 | 3.40 / 3.26 | 10,084 / 17,232 | 6 / 6 | 256 / 231 |
+| 5 | 23 / 23 | 3.85 / 3.85 | 1,938 / 3,373 | 6 / 6 | 131 / 98 |
+| 6 | 17 / 17 | 4.07 / 4.07 | 3,030 / 3,780 | 6 / 6 | 98 / 93 |
+| 7 | 12 / 12 | 7.95 / 7.95 | 6,950 / 10,957 | 5 / 6 | 223 / 273 |
+| 8 | 10 / 10 | 6.80 / 6.80 | 3,341 / 4,871 | 5 / 5 | 222 / 176 |
+| 9 | 16 / 16 | 2.08 / 2.08 | 7,726 / 11,581 | 6 / 6 | 258 / 295 |
+| 10 | 13 / 13 | 3.64 / 3.51 | 930 / 2,003 | 6 / 6 | 75 / 113 |
+
+Every answer and pair is the same; the funnel forms 1.2 to 2.2 times as many distinct
+hypotheses, the passes the old one dropped, and two cases' margins fall by 0.13 dB to runner-ups
+it never formed. The ten cases took 25 min 21 s against 26 min 35 s.
+
+**Real recordings.** The reference search over the metro box (run 5) ranks the published site
+first again, 173 m off, 19.88 with a margin of 1.61 and the start within 0.4 s, as run 4 did,
+from 129,236 distinct hypotheses (run 4 scored 244,711 rows, repeats included): the funnel took
+405 s against 314 s, the cost of the extra passes, and scoring 97 s against 160 s on 12
+processes, 9 minutes in all. personal-1 changes more, because its loud flyover is a trainer at
+pattern speed in a metro full of training traffic. With the clock (plus or minus 2 s) and both
+flyovers the answer is the same, 190 m off, but the margin falls from 12.32 to 3.33: three pairs
+of other light aircraft 40 to 46 km away (a Cessna 206 with a Cessna 172, and two pairs of
+172s), which the old funnel never paired on the passes that fit, now meet the clock and score
+11.6 to 14.2, where its best rival scored 5.2; the faint second flyover (+2.0 for the true pair
+against -1.9 to +1.8 for these) decides. The 12 dB margins of the second pass were the old
+funnel not forming those rivals. Without the clock the search fails as before, 46 km off: the
+funnel forms 173,566 distinct hypotheses against 117,550, and the true pair's best cell within
+300 m, which scores 17.34 either way, ranks 313th instead of 184th, behind 112 other pairs
+instead of 66. The loud flyover alone with the clock is unchanged (11.5 km, the truth 5th).
+Counting every pass of the region's trainers makes the field fuller; it is the clock that thins
+it.
+
+**Short clips, again.** Both clip sweeps were rerun on the new funnel with the same cut traces
+and clocks. The reference recording's 30 runs give the same answer as before, every one, with
+the same two-flyover margins. personal-1's two flyovers with the clock are first at every length
+that holds both, down to 150 s, at the same distances (190 m, 130 m at 150 s, and 235 m at 120
+s), with margins of 2.6 to 3.5 dB instead of 12 to 13, for the reason above; its loud flyover
+alone is unchanged within two ranks. So the clip-length findings of the second pass stand, with
+personal-1's margins restated. A slip in the first rerun showed how much one flyover leans on
+the clock: started 0.18 s later than the assumed clock, which the tracks themselves imply and
+the two-flyover search puts 0.4 s early, the reference's faint flyover alone landed 88 to 169 m
+off and first within 200 m at every length from 60 s to the hour, against 95 to 511 m and first
+at four of ten lengths with the assumed clock.
+
+**A shortlist of sparse storms.** `scripts/m6_thunder_shortlist.py` searches the Internet
+Archive's radio aporee mirror for items that mention thunder or storms (1,116 hits), keeps those
+with a published position inside GLM coverage on a date GLM was operational (97), whose title or
+description mentions thunder under a public-domain mark or a Creative Commons licence (48), and
+rates each from one GLM file in six (20 s every 2 minutes) over the stated recording time and 45
+minutes either side. Ten had sampled flashes within 25 km during the recording at a sparse rate,
+4 a minute or fewer; twelve had flashes within 25 km only before or after it; eight sat in dense
+storms, above 4 a minute (both failed cases, at 10 to 20 a minute, would have been among them);
+two saw flashes only beyond 25 km and sixteen none within 50 km, among them rain and wind
+recordings that only mention storms. The five sparse items with the most nearby flashes during
+the recording were analysed blind, with the protocol of the two failed cases: a day around the
+stated start as the time prior, a box the size of the state the item names as the region prior
+(the state of the recordist's other recordings where the title names none), default settings,
+the truth read only at scoring.
+
+None of the five was located (rows thunder-3 to thunder-7 above). Each true site was then scored
+by hand over the same prior, a 5 km box around it, and GLM's flashes were counted during the
+stated recording with every file:
+
+| case | recording | GLM flashes while recording, within 10 / 25 km | blind rank 1 | true site's own best |
+| --- | --- | --- | --- | --- |
+| thunder-3 | 19 min from a city window, in rain; 21 loudness peaks | 2 / 22 (1.2 a minute within 25 km) | 439 km off, 0.837, margin 0.000 | 0.763, at a start 84 min before the stated one |
+| thunder-4 | 18 min beside a stream and a road; 11 peaks | 1 / 32 (1.7 a minute) | 74 km off, 0.746, margin 0.019; the true area ranks 10th, 6.5 km off | 0.681, 8 min before the stated start |
+| thunder-5 | the same storm, 13 min later, 1 km away; 3 peaks | 0 / 16 | 23 km off, 0.936, margin 0.001 | 0.896, 138 min before |
+| thunder-6 | 80 min in a tent; 18 peaks | 4 / 36 (0.45 a minute) | 142 km off, 0.625, margin 0.023 | 0.544, 13 min after |
+| thunder-7 | 55 min at a shoreline park, its file name dated three months after its published date; 10 peaks | 4 / 11 | 330 km off, 0.760, margin 0.002 | 0.546, 41 min before |
+
+The storms were sparse, but they were not near: no recording had more than 4 flashes within 10
+km, so what it heard was rumble from 10 to 25 km, which the 5 s smoothed envelope turns into
+broad bumps much like the rain, stream and traffic it rides on. With a day of a state's
+lightning to choose from, some other place and start always fits such an envelope better than
+the truth (0.63 to 0.94 against 0.54 to 0.90), and the published starts did not pin the truth
+either: one is a round hour and two more are rounded to ten or fifteen minutes, and the truth's
+own best start lies 8 to 138 minutes from the stated one. thunder-4 came nearest: its true area
+found its own start 8 minutes before the stated one and ranked 10th, 6.5 km off, behind
+impostors 0.02 to 0.09 higher. A success needs claps within about 10 km, a few a minute and not
+dozens, and a recording whose start is known, so the shortlist now ranks each class by the
+flashes within 10 km during the recording first.
+
+**A thunder case located.** Ranked that way, the shortlist's first item is an 8 minute clip of
+hail and occasional thunder from a city window, with traffic, on a day when the province around
+it saw 121 GLM flashes in all; one flash during the clip fell 0.6 km from the recordist, one
+more within 10 km, three within 25 km. Analysed blind with the same protocol, a box the size of
+the province the item names and a day around the stated start, it ranks a point 2.2 km from the
+site first (row thunder-8 above), with a score of 0.928 and a margin of 0.084 over the runner-up
+16 km away, and a start 4 minutes before the stated round hour; the true site's own best is
+0.912 at the same start. It is the first real thunder recording the method has located, and a
+short one: two loudness peaks in eight minutes. What sets it apart is the lightning inside its
+prior, a province over a day: 121 flashes, against 1,252 for thunder-4 and -5, 9,922 to 20,962
+for thunder-3, -6 and -7, and 41,579 and 198,917 for the two dense-storm failures. The same clip
+searched over all of western North America for that day (871 flashes, 1,414 candidate cells
+after the prefilter) still ranks the site first, 2.1 km off, but a storm 1,984 km away ties it
+(0.9275 against 0.9273). So a thunder clip can be short when its claps are near and the
+lightning in its prior is rare: a few flashes leave few places and starts that fit two claps. A
+near clap alone is not enough where storms are common: thunder-3 heard two flashes within 10 km,
+the nearest 2.6 km away, and failed against the 9,922 in its prior.
+
+**Online clips of a single strike.** Doorbell and security cameras that catch a strike next
+door seemed the way to a known clock, so three such news uploads with the street published were
+fetched. None carries a clock: the camera maker's export shows its logo and no time. One, a
+doorbell in a news package, has the anchors talking over the strike and no clap left in the 20
+to 250 Hz band. The other two hold the same strike from two cameras on one house, a single clap
+and its rumble each (thunder-9). Searched over the state with the time the reports give (the
+fire call), plus or minus an hour, they rank points 53 and 381 km away first at 0.999 and 0.984
+with no margin: 8,102 flashes fell in the box in those two hours, and a single clap fits any of
+them. The true site's own best is 0.966, at a start that puts the clap on one of the 13 flashes
+GLM saw within 3 km in the half hour before the call. A thundersnow clip from a doorbell, with
+its time to the minute and its neighbourhood published, was not fetched: GLM saw no flash within
+100 km in the two hours around it, the optical sensor's known blind spot for shallow winter
+storms. A clip of one clap can be located only with a clock that singles out its flash.
+
+**Clips with a clock.** Uploads whose camera prints its clock on the picture were looked for
+next, among owners' and stations' doorbell, security, dashcam and webcam clips, by title,
+description and preview frame, and each lead was checked against GLM before anything was
+fetched; most named only a city or nothing, a nest camera's clock fell on a day GLM saw no
+flash within 5 km, and a dashcam that prints time and position sat in a storm of 2,841 flashes
+within 25 km in an hour. Two were fetched. One, a strike on a named bar, is a broadcaster's
+edit whose captions cover the clock and whose audio holds no distinct clap; it was not
+analysed. The other (thunder-10) is an owner's edit of a storm over a published street from
+several cameras: 25 s of real time around one strike, 110 s of a later stretch whose clock
+gains 7% on the video (seconds dropped from the recording), slow-motion replays, and views with
+no clock. Run with the clock to 3 s over the state, the 25 s piece fits everywhere (0.98, rank 1
+67 km off); the 110 s piece, with five claps from flashes 5 to 10 km away in a storm of 9 a
+minute within 25 km, ranks a point 33 km away first and one 4.3 km from the street sixth (0.893
+against 0.924), the true site's own best 0.866; stretched to the clock it does no better (7.5
+km). The first run of these showed the refinement leaving the time prior, searching start
+offsets a minute either side of the coarse best and returning starts 19 to 99 s outside the
+clock's window; it now stays inside the prior. A clock and a handful of claps bring the truth
+into the top ten; they do not yet beat a storm's worth of impostors.
 
 ## M5: desktop UI, from a file to a heat map without the CLI
 
