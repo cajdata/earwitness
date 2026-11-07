@@ -11,6 +11,10 @@ closest one plus the known recording start. Earshot is the funnel's silence dist
 lattice spacing, so a careful user's silence windows stay conservative for a candidate cell up
 to half a diagonal away from the site.
 
+With --auto-events the measurements come from the recording instead of the truth: the
+flyovers are measured automatically (`earwitness.aircraft.detect`), the strongest one or two
+become the events, and no silence windows are marked, as `earwitness locate` does.
+
 Scores: distance of the rank-1 answer from the site, distance from the site's mirror image
 across the event flight's path (a single straight flyover cannot tell the two apart), whether
 the right flights were paired, candidate counts and runtime.
@@ -218,6 +222,45 @@ def render_case(
     return truth
 
 
+def measured_events(wav: Path, need: int, args: argparse.Namespace) -> object:
+    """The strongest `need` flyovers measured from the recording, as `earwitness locate`
+    takes them (the known time is set by the caller in single-event mode)."""
+    from dataclasses import replace
+
+    from earwitness.aircraft.detect import (
+        RATE_HZ,
+        DetectConfig,
+        auto_events,
+        detect_flyovers,
+        detection_spectrogram,
+    )
+    from earwitness.audio.decode import read_audio
+
+    cfg = DetectConfig()
+    if args.core is not None:
+        cfg = replace(cfg, core=(args.core[0], args.core[1]))
+    factor = args.valley_rms_factor if args.valley_rms_factor is not None else cfg.valley_rms_factor
+    samples, rate = read_audio(wav, target_rate=RATE_HZ)
+    det = detect_flyovers(detection_spectrogram(samples, rate, cfg), cfg)
+    if len(det.flyovers) < need:
+        return None
+    from datetime import UTC, datetime
+
+    placeholder = datetime(2000, 1, 1, tzinfo=UTC) if need == 1 else None
+    events = auto_events(det, max_events=need, known_time=placeholder, valley_rms_factor=factor)
+    if events is not None:
+        events.known_time = None
+        print(
+            "  measured: "
+            + "; ".join(
+                f"{f.heard_s:.0f} s f0 {f.line.fit.f0_hz:.1f} Hz v {f.line.fit.v_mps:.0f}"
+                f" d {f.line.fit.d_m:.0f}"
+                for f in sorted(det.flyovers[:need], key=lambda x: x.heard_s)
+            )
+        )
+    return events
+
+
 def mirror_point(fs: FlightSet, flight: int, site: tuple[float, float]) -> tuple[float, float]:
     """Reflection of the site across the flight's ground path near closest approach."""
     track = fs.track(flight)
@@ -269,6 +312,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--top", type=int, default=10)
     ap.add_argument("--max-candidates", type=int, default=30000)
+    ap.add_argument(
+        "--auto-events",
+        action="store_true",
+        help="measure the flyovers from the recording (no truth, no silence windows)",
+    )
+    ap.add_argument("--core", nargs=2, type=float, default=None, help="detector core lo hi")
+    ap.add_argument("--valley-rms-factor", type=float, default=None)
     args = ap.parse_args(argv)
 
     bbox = parse_bbox(args.bbox)
@@ -327,9 +377,16 @@ def main(argv: list[str] | None = None) -> int:
             np.random.default_rng(args.seed + k),
             case_dir / "truth",
         )
-        events = events_from_truth(
-            truth, max_events=need, harmonics=args.event_harmonics, edge_margin_s=60.0
-        )
+        if args.auto_events:
+            events = measured_events(case_dir / "truth" / "recording.wav", need, args)
+            if events is None:
+                print(f"\ncase {k}: the detector found too few flyovers")
+                rows.append({"case": k, "site": case["site"], "auto_events": 0})
+                continue
+        else:
+            events = events_from_truth(
+                truth, max_events=need, harmonics=args.event_harmonics, edge_margin_s=60.0
+            )
         if args.mode == "single":
             events.known_time = datetime.fromtimestamp(float(case["t_start"]), tz=UTC)
             events.known_time_tolerance_s = 1.0

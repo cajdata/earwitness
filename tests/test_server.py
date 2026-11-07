@@ -451,3 +451,46 @@ def test_run_files_with_nan_reach_the_browser_as_null(api, tmp_path):
     assert client.get("/api/runs/nan-run").json()["coarse"] is None
     overlay = client.get("/api/runs/nan-run/overlay/1").json()
     assert overlay["curves"][0]["modeled_hz"] == [1.0, None, None]
+
+
+def test_locate_through_the_api(api, tmp_path, monkeypatch):
+    import earwitness.locate as locate_module
+
+    client, ws = api
+    case, _, flights = _aircraft_case(tmp_path)
+    monkeypatch.setattr(
+        locate_module,
+        "ensure_flights",
+        lambda day, region, cache, variant, fetch, progress: flights,
+    )
+    rid = client.post("/api/recordings/open", json={"path": str(case / "recording.wav")}).json()[
+        "id"
+    ]
+    info = client.get(f"/api/recordings/{rid}/start").json()
+    assert info["start"] is None  # a plain WAV named recording.wav carries no start time
+    assert isinstance(info["computer_offset_min"], int)
+    heard = client.post(f"/api/recordings/{rid}/flyovers").json()
+    assert len(heard["flyovers"]) >= 2
+    assert [e["id"] for e in heard["events"]["events"]] == ["auto1", "auto2"]
+    nowhere = client.post("/api/locate", json={"recording_id": rid, "date": "2026-09-08"})
+    assert nowhere.status_code == 400
+    started = client.post(
+        "/api/locate",
+        json={
+            "recording_id": rid,
+            "date": "2026-09-08",
+            "center": [LAT, LON],
+            "radius_km": 15,
+            "methods": ["aircraft"],
+            "terrain": False,
+        },
+    )
+    assert started.status_code == 202
+    job = ws.jobs.wait(started.json()["id"], timeout=900)
+    assert job.status == "done", job.error
+    answer = job.result["answer"]
+    assert answer["method"] == "aircraft"
+    assert answer["run_id"]
+    summary = client.get(f"/api/runs/{answer['run_id']}").json()
+    assert aircraft_distance(summary, LAT, LON)[0] < 200.0
+    assert client.get(f"/api/runs/{answer['run_id']}/events").json()["events"][0]["id"] == "auto1"

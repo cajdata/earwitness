@@ -236,3 +236,79 @@ export interface Estimate {
   coarse_cells?: number;
   start_times?: number;
 }
+
+// ------------------------------------------------------------------ one-step locate
+
+export interface StartHint {
+  start_utc: string;
+  local: string | null;
+  utc_offset_min: number | null;
+  tolerance_s: number;
+  exact: boolean;
+  source: string;
+  note: string;
+  assumed_zone: boolean;
+}
+
+export interface StartInfo {
+  start: StartHint | null;
+  computer_offset_min: number;
+}
+
+export interface FlyoverSummary {
+  heard_s: number;
+  f0_hz: number;
+  v_mps: number;
+  d_m: number;
+  rms_hz: number;
+  start_s: number;
+  end_s: number;
+  points: number;
+  lines_hz: number[];
+  harmonics: number;
+  quality: number;
+}
+
+export interface FlyoversResult {
+  flyovers: FlyoverSummary[];
+  counts: Record<string, number>;
+  events: EventsFile | null;
+}
+
+export interface LocateMethod {
+  method: string;
+  status: "ran" | "skipped" | "failed";
+  reason: string;
+  run_dir: string | null;
+  run_id?: string | null;
+  lat: number | null;
+  lon: number | null;
+  score: number | null;
+  margin: number | null;
+  level: string | null;
+  sentence: string | null;
+  start_utc: string | null;
+  runtime_s: number | null;
+  top: { rank: number; lat: number; lon: number; score: number; start_utc: string | null }[];
+}
+
+export interface LocateSummary {
+  schema: string;
+  recording: { file: string; sha256: string; duration_s: number };
+  time_prior: { window_start_utc: string; window_end_utc: string; start_utc: string | null; tolerance_s: number | null };
+  region: Bounds;
+  clues: Record<string, { present: boolean; confidence: string; summary: string }>;
+  flyovers: FlyoverSummary[];
+  events_used: string[];
+  methods: LocateMethod[];
+  answer: {
+    method: string;
+    lat: number;
+    lon: number;
+    level: string;
+    sentence: string;
+    run_dir: string | null;
+    run_id?: string;
+  } | null;
+  runtime_s: number;
+}

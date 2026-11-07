@@ -1,7 +1,9 @@
 """Command-line entry point: `earwitness <command>`. The planned surface is in docs/HANDOFF.md.
 
 Implemented: `simulate thunder|aircraft` (M1), `data glm` and `analyze thunder` (M2), `data adsb`
-(M3), `analyze aircraft` (M4), `audit` and `ui` (M5), `demo` (M7, the install check).
+(M3), `analyze aircraft` (M4), `audit` and `ui` (M5), `demo` (M7, the install check), and the
+one-step flow after it: `measure` (flyovers measured automatically into events.json) and
+`locate` (a file, a rough time and place, and plain answers).
 """
 
 from __future__ import annotations
@@ -53,6 +55,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     _build_audit(sub.add_parser("audit", help="report which location clues a recording contains"))
+
+    _build_measure(
+        sub.add_parser("measure", help="measure a recording's propeller flyovers automatically")
+    )
+    _build_locate(
+        sub.add_parser(
+            "locate", help="one step: a recording, a rough time and place, and plain answers"
+        )
+    )
 
     _build_ui(sub.add_parser("ui", help="open the desktop UI"))
 
@@ -631,6 +642,221 @@ def _audit(args: argparse.Namespace) -> int:
     else:
         print(report.text())
     return 0
+
+
+def _clock(seconds: float) -> str:
+    """Seconds into a recording as m:ss."""
+    s = max(0, round(seconds))
+    return f"{s // 60}:{s % 60:02d}"
+
+
+def _build_measure(p: argparse.ArgumentParser) -> None:
+    p.description = (
+        "Find every propeller flyover in a recording and fit it, the way the UI's trace and fit "
+        "tools do by hand, and optionally write the strongest ones as events.json for "
+        "`earwitness analyze aircraft`."
+    )
+    p.add_argument("file", help="local audio or video file")
+    p.add_argument("--out", type=Path, default=None, help="write events.json here")
+    p.add_argument("--top", type=int, default=2, help="flyovers to write (default 2)")
+    p.add_argument("--known-time", default=None, help="recording start, UTC ISO")
+    p.add_argument("--known-time-tolerance", type=float, default=2.0, help="seconds (default 2)")
+    p.add_argument("--json", action="store_true", help="print the flyovers as JSON")
+    p.set_defaults(func=_measure)
+
+
+def _measure(args: argparse.Namespace) -> int:
+    import json
+
+    from earwitness.aircraft.detect import (
+        RATE_HZ,
+        DetectConfig,
+        auto_events,
+        detect_flyovers,
+        detection_spectrogram,
+    )
+    from earwitness.audio.decode import read_audio
+    from earwitness.project import parse_utc, sha256_file
+
+    recording = Path(args.file)
+    if not recording.exists():
+        print(f"earwitness: no such file {recording}", file=sys.stderr)
+        return 2
+    samples, rate = read_audio(recording, target_rate=RATE_HZ)
+    cfg = DetectConfig()
+    detection = detect_flyovers(detection_spectrogram(samples, rate, cfg), cfg)
+    flyovers = [f.summary() for f in detection.flyovers]
+    if args.json:
+        print(json.dumps({"flyovers": flyovers, "counts": detection.counts}, indent=2))
+    else:
+        print(f"{len(flyovers)} propeller flyover(s) in {recording.name}, strongest first:")
+        for k, f in enumerate(flyovers, start=1):
+            lines = ", ".join(f"{x:g}" for x in f["lines_hz"])  # type: ignore[union-attr]
+            print(
+                f"  {k}. heard at {_clock(float(f['heard_s']))} ({f['heard_s']:.1f} s): "  # type: ignore[arg-type]
+                f"f0 {f['f0_hz']:.1f} Hz, {f['v_mps']:.0f} m/s, closest {f['d_m']:.0f} m; "
+                f"lines {lines} Hz; quality {f['quality']:.0f}"
+            )
+    if args.out is not None:
+        known = parse_utc(args.known_time) if args.known_time else None
+        events = auto_events(
+            detection,
+            max_events=args.top,
+            known_time=known,
+            known_time_tolerance_s=args.known_time_tolerance,
+            recording={"file": recording.name, "sha256": sha256_file(recording)},
+        )
+        if events is None:
+            print(
+                "earwitness: no events written: no flyover was measured, or only one and no "
+                "--known-time",
+                file=sys.stderr,
+            )
+            return 1
+        events.save(args.out)
+        print(f"wrote {args.out} ({', '.join(e.id for e in events.events)})")
+    return 0
+
+
+def _build_locate(p: argparse.ArgumentParser) -> None:
+    p.description = (
+        "Audit a recording, read its start time from the file when it carries one, measure its "
+        "flyovers automatically, download the day's flights and lightning for the area, run "
+        "each method the recording has clues for, and say how sure each answer is."
+    )
+    p.add_argument("file", help="local audio or video file")
+    where = p.add_argument_group("roughly where")
+    where.add_argument("--near", default=None, help="LAT,LON at the middle of the area")
+    where.add_argument("--radius-km", type=float, default=25.0, help="around --near (default 25)")
+    where.add_argument("--bbox", default=None, nargs="+", help=BBOX_HELP)
+    when = p.add_argument_group("roughly when (default: the start time the file carries)")
+    when.add_argument(
+        "--start",
+        default=None,
+        help="recording start, ISO; with Z or an offset, or this computer's local time",
+    )
+    when.add_argument(
+        "--tolerance", type=float, default=None, help="how far off --start may be, s (default 2)"
+    )
+    when.add_argument("--date", default=None, help="only the UTC day, YYYY-MM-DD")
+    when.add_argument("--date-end", default=None, help="last possible UTC day, inclusive")
+    when.add_argument(
+        "--ignore-file-time", action="store_true", help="do not read a start time from the file"
+    )
+    run = p.add_argument_group("search")
+    run.add_argument("--methods", default="aircraft,thunder", help="default aircraft,thunder")
+    run.add_argument("--no-fetch", action="store_true", help="use the cache only")
+    run.add_argument("--no-terrain", action="store_true", help="flat ground at the ellipsoid")
+    run.add_argument(
+        "--workers", type=int, default=1, help="processes that score candidates (0: one per CPU)"
+    )
+    run.add_argument("--cache", type=Path, default=None, help="cache root (default data/cache)")
+    out = p.add_argument_group("output")
+    out.add_argument("--out", type=Path, default=None, help="folder (default runs/<stamp>-locate)")
+    out.add_argument("--quiet", action="store_true", help="no progress output")
+    out.add_argument("--json", action="store_true", help="print locate.json at the end")
+    p.set_defaults(func=_locate)
+
+
+def _locate(args: argparse.Namespace) -> int:
+    import json
+    from datetime import datetime
+
+    from earwitness.audit.clock import start_time
+    from earwitness.audit.report import probe_metadata
+    from earwitness.core import geodesy
+    from earwitness.core.grid import parse_bbox
+    from earwitness.locate import LocateOptions, TimePrior, locate, region_around
+    from earwitness.project import parse_utc_date, utc_now
+
+    recording = Path(args.file)
+    if not recording.exists():
+        print(f"earwitness: no such file {recording}", file=sys.stderr)
+        return 2
+    if args.near:
+        try:
+            lat, lon = (float(x) for x in args.near.replace(" ", "").split(","))
+        except ValueError:
+            print("earwitness: --near needs LAT,LON", file=sys.stderr)
+            return 2
+        region = region_around(lat, lon, args.radius_km * 1000.0)
+    elif args.bbox:
+        region = parse_bbox(args.bbox)
+    else:
+        print("earwitness: say roughly where with --near LAT,LON or --bbox", file=sys.stderr)
+        return 2
+
+    if args.start:
+        start = datetime.fromisoformat(args.start.replace("Z", "+00:00"))
+        if start.tzinfo is None:
+            start = start.astimezone()  # this computer's local time, with its daylight rules
+        when = TimePrior.at(start, args.tolerance if args.tolerance is not None else 2.0)
+        print(f"start: {when.start:%Y-%m-%d %H:%M:%S} UTC +-{when.tolerance_s:g} s (given)")
+    elif args.date:
+        last = parse_utc_date(args.date_end).date() if args.date_end else None
+        when = TimePrior.days(parse_utc_date(args.date).date(), last)
+        print(f"start: some time on {args.date}{f' to {args.date_end}' if last else ''} (UTC)")
+    else:
+        meta = {} if args.ignore_file_time else probe_metadata(recording)
+        tags = meta.get("tags") if isinstance(meta.get("tags"), dict) else {}
+        duration = float(meta.get("duration_s") or 0.0)  # type: ignore[arg-type]
+        found = (
+            None if args.ignore_file_time else start_time(recording.name, tags, duration)  # type: ignore[arg-type]
+        )
+        if found is None:
+            print(
+                "earwitness: the file carries no start time; give --start or --date",
+                file=sys.stderr,
+            )
+            return 2
+        tolerance = args.tolerance if args.tolerance is not None else found.tolerance_s
+        when = TimePrior.at(found.utc, tolerance)
+        print(f"start: {found.utc:%Y-%m-%d %H:%M:%S} UTC +-{tolerance:g} s. {found.note}")
+
+    methods = tuple(m.strip() for m in args.methods.split(",") if m.strip())
+    options = LocateOptions(
+        methods=methods,
+        fetch=not args.no_fetch,
+        terrain=not args.no_terrain,
+        workers=args.workers,
+    )
+    out_dir = args.out or Path("runs") / f"{utc_now():%Y%m%dT%H%M%SZ}-{recording.stem}-locate"
+    summary = locate(
+        recording,
+        when,
+        region,
+        out_dir,
+        cache=args.cache,
+        options=options,
+        progress=None if args.quiet else print,
+    )
+    if args.json:
+        print(json.dumps(summary, indent=2))
+        return 0
+    print()
+    for m in summary["methods"]:  # type: ignore[union-attr]
+        if m["status"] == "ran" and m["lat"] is not None:
+            margin = "" if m["margin"] is None else f", margin {m['margin']:.2f}"
+            print(
+                f"{m['method']}: {m['lat']:.5f}, {m['lon']:.5f} (score {m['score']:.3f}{margin})"
+                f" - {m['sentence']}"
+            )
+            rivals = []
+            for t in m["top"][1:4]:
+                km = float(geodesy.horizontal_distance(m["lat"], m["lon"], t["lat"], t["lon"]))
+                rivals.append(f"{km:.1f} km away ({m['score'] - t['score']:.2f} lower)")
+            if rivals:
+                print(f"  next best: {'; '.join(rivals)}")
+            print(f"  run folder: {m['run_dir']}")
+        else:
+            print(f"{m['method']}: {m['status']}: {m['reason']}")
+    answer = summary.get("answer")
+    if answer:
+        print(f"\nbest answer ({answer['method']}): {answer['lat']:.5f}, {answer['lon']:.5f}")  # type: ignore[index]
+    else:
+        print("\nno answer")
+    print(f"summary: {Path(out_dir) / 'locate.json'}")
+    return 0 if answer else 1
 
 
 def _build_ui(p: argparse.ArgumentParser) -> None:

@@ -3,6 +3,7 @@ import { api, initToken } from "./api";
 import { h, clear } from "./dom";
 import { on, save, state, type ViewName } from "./state";
 import { mountAudit } from "./views/audit";
+import { mountLocate } from "./views/locate";
 import { mountSetup } from "./views/setup";
 import { mountAudio } from "./views/audio";
 import { mountRun } from "./views/run";
@@ -10,22 +11,25 @@ import { mountResults } from "./views/results";
 
 type Mount = (container: HTMLElement) => () => void;
 
-const VIEWS: { name: ViewName; label: string; mount: Mount; needs?: () => string | null }[] = [
+const VIEWS: { name: ViewName; label: string; mount: Mount; needs?: () => string | null; byHand?: boolean }[] = [
   { name: "audit", label: "Audit", mount: mountAudit },
-  { name: "setup", label: "Setup", mount: mountSetup },
+  { name: "locate", label: "Locate", mount: mountLocate },
+  { name: "results", label: "Results", mount: mountResults },
+  { name: "setup", label: "Setup", mount: mountSetup, byHand: true },
   {
     name: "audio",
     label: "Audio",
     mount: mountAudio,
     needs: () => (state.recording ? (state.method === "audit" ? "choose a method in Setup" : null) : "open a recording in Setup"),
+    byHand: true,
   },
   {
     name: "run",
     label: "Run",
     mount: mountRun,
     needs: () => (state.recording ? (state.method === "audit" ? "choose a method in Setup" : null) : "open a recording in Setup"),
+    byHand: true,
   },
-  { name: "results", label: "Results", mount: mountResults },
 ];
 
 const root = document.getElementById("app")!;
@@ -58,8 +62,13 @@ export function show(name: ViewName): void {
 
 function renderNav(): void {
   clear(nav);
+  let shownByHand = false;
   for (const view of VIEWS) {
     const blocker = view.needs?.();
+    if (view.byHand && !shownByHand) {
+      nav.append(h("span", { class: "nav-label", title: "set every prior and measure each flyover yourself" }, "by hand:"));
+      shownByHand = true;
+    }
     nav.append(
       h(
         "button",

@@ -64,6 +64,23 @@ class AircraftRunRequest(BaseModel):
     harmonics: int = 1
 
 
+class LocateRequest(BaseModel):
+    """`earwitness locate` as a request: a known start (with its tolerance) or the day(s), and
+    a point with a radius (or a box)."""
+
+    recording_id: str
+    start_utc: str | None = None
+    tolerance_s: float | None = None
+    date: str | None = None
+    date_end: str | None = None
+    center: list[float] | None = Field(default=None, min_length=2, max_length=2)
+    """[lat, lon]."""
+    radius_km: float | None = None
+    bbox: Bounds | None = Field(default=None, min_length=4, max_length=4)
+    methods: list[str] = Field(default_factory=lambda: ["aircraft", "thunder"])
+    terrain: bool = True
+
+
 class AdsbFetchRequest(BaseModel):
     """`earwitness data adsb` as a request."""
 
@@ -241,6 +258,55 @@ def run_aircraft(ws: Workspace, req: AircraftRunRequest, progress: Progress) -> 
         "top": summary["top"],
         "runtime_s": summary["runtime_s"],
     }
+
+
+def locate_priors(req: LocateRequest) -> tuple[object, BBox]:
+    """The time prior and the region a locate request describes."""
+    from earwitness.locate import TimePrior, region_around
+
+    if req.start_utc:
+        when = TimePrior.at(parse_utc(req.start_utc), req.tolerance_s or 2.0)
+    elif req.date:
+        last = parse_utc_date(req.date_end).date() if req.date_end else None
+        when = TimePrior.days(parse_utc_date(req.date).date(), last)
+    else:
+        raise ValueError("say when: a start time or a date")
+    if req.center is not None:
+        if not req.radius_km or req.radius_km <= 0:
+            raise ValueError("a point needs a radius")
+        region = region_around(req.center[0], req.center[1], req.radius_km * 1000.0)
+    elif req.bbox is not None:
+        region = BBox(*req.bbox)
+    else:
+        raise ValueError("say where: a point with a radius, or a box")
+    return when, region
+
+
+def run_locate(ws: Workspace, req: LocateRequest, progress: Progress) -> dict[str, object]:
+    """The one-step locate, with each method's run folder beside the UI's other runs."""
+    from earwitness.locate import LocateOptions, locate
+
+    rec = ws.recording(req.recording_id)
+    when, region = locate_priors(req)
+    known = {"aircraft", "thunder"}
+    methods = tuple(m for m in req.methods if m in known) or ("aircraft", "thunder")
+    out = ws.new_run_dir(rec.path.stem, "locate")
+    summary = locate(
+        rec.path,
+        when,  # type: ignore[arg-type]
+        region,
+        out,
+        cache=ws.cache_override,
+        options=LocateOptions(methods=methods, terrain=req.terrain),
+        progress=progress,
+        run_dirs=lambda method: ws.new_run_dir(rec.path.stem, method),
+    )
+    for m in summary["methods"]:  # type: ignore[union-attr]
+        m["run_id"] = Path(m["run_dir"]).name if m.get("run_dir") else None
+    answer = summary.get("answer")
+    if isinstance(answer, dict) and answer.get("run_dir"):
+        answer["run_id"] = Path(str(answer["run_dir"])).name
+    return summary
 
 
 def fetch_adsb(ws: Workspace, req: AdsbFetchRequest, progress: Progress) -> dict[str, object]:

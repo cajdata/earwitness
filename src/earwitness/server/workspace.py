@@ -45,6 +45,7 @@ class Recording:
     )
     _envelope: Envelope | None = field(default=None, repr=False)
     _wind: NDArray[np.bool_] | None = field(default=None, repr=False)
+    _detection: object | None = field(default=None, repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     @property
@@ -86,6 +87,24 @@ class Recording:
             if self._wind is None:
                 self._wind = wind_mask(self.samples, self.rate, EnvelopeConfig())
             return self._wind
+
+    def detection(self) -> object:
+        """The automatically measured flyovers (`aircraft.detect.Detection`), cached."""
+        from earwitness.aircraft.detect import (
+            RATE_HZ,
+            DetectConfig,
+            detect_flyovers,
+            detection_spectrogram,
+        )
+
+        with self._lock:
+            if self._detection is None:
+                if self.rate != RATE_HZ:
+                    raise ValueError(f"recordings are decoded at {self.rate} Hz, not {RATE_HZ}")
+                cfg = DetectConfig()
+                spec = detection_spectrogram(self.samples, self.rate, cfg)
+                self._detection = detect_flyovers(spec, cfg)
+            return self._detection
 
 
 def block_reduce(values: FloatArray, factor: int, axis: int, how: str = "max") -> FloatArray:

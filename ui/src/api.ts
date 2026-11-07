@@ -9,6 +9,7 @@ import type {
   Estimate,
   EventsFile,
   FitResult,
+  FlyoversResult,
   Health,
   HeatMap,
   Histogram,
@@ -19,6 +20,7 @@ import type {
   RunCard,
   RunSummary,
   SpectrogramView,
+  StartInfo,
 } from "./types";
 
 const TOKEN_KEY = "earwitness.token";
@@ -96,6 +98,9 @@ export const api = {
   envelope: (rid: string) => get<EnvelopeView>(`/recordings/${rid}/envelope`),
   ridge: (rid: string, body: Record<string, unknown>) => post<RidgeResult>(`/recordings/${rid}/ridge`, body),
   audit: (rid: string) => post<AuditReport>(`/recordings/${rid}/audit`),
+  startInfo: (rid: string) => get<StartInfo>(`/recordings/${rid}/start`),
+  flyovers: (rid: string) => post<FlyoversResult>(`/recordings/${rid}/flyovers`),
+  startLocate: (body: Record<string, unknown>) => post<JobSnapshot>("/locate", body),
 
   preview: (body: Record<string, unknown>) => post<PreviewResult>("/doppler/preview", body),
   fit: (points: [number, number][]) => post<FitResult>("/doppler/fit", { points }),

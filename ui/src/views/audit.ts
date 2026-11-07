@@ -135,10 +135,18 @@ function renderReport(report: AuditReport, into: HTMLElement): void {
     h(
       "div",
       { class: "row" },
-      button("Locate with thunder", () => chooseMethod("thunder")),
-      button("Locate with aircraft Doppler", () => chooseMethod("aircraft")),
+      button("Find where it was recorded", () => go("locate"), "btn primary"),
+      h("span", { class: "muted" }, "Say roughly when and where; the flyovers are measured for you."),
     ),
-    h("p", { class: "muted" }, "Locating needs the date of the recording and a search region; both methods are set up on the next page."),
+    h(
+      "p",
+      { class: "muted" },
+      "Or set up a search by hand: ",
+      h("a", { href: "#/setup", onclick: (e: Event) => { e.preventDefault(); chooseMethod("thunder"); } }, "thunder"),
+      " · ",
+      h("a", { href: "#/setup", onclick: (e: Event) => { e.preventDefault(); chooseMethod("aircraft"); } }, "aircraft Doppler"),
+      ". By hand you trace each flyover yourself, which helps when the automatic measurement picks the wrong line.",
+    ),
   );
 }
 

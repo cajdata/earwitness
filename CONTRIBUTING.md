@@ -31,6 +31,16 @@ The full spec is docs/HANDOFF.md. Read it before changing anything in src/.
   release notes in docs/release-notes/, and the site; docs/RELEASING.md has the steps. v0.1.0
   released on 2026-11-06 (PyPI, and a GitHub Release with the Windows zip) after the
   clean-machine check passed in Windows Sandbox.
+- One-step locate (after v0.1.0): `earwitness locate <file> --near LAT,LON` and the UI's
+  Locate page. `earwitness.aircraft.detect` measures flyovers without clicks (peak tracks, a
+  fit, a trace guided along the fitted curve's falling part in runs that last, a gate against
+  road traffic, lines grouped by aircraft, the strongest aircraft claiming its peaks first);
+  `earwitness.audit.clock` reads the start from file names and container tags (Android's stop
+  time and Samsung's offset tag, the QuickTime date, Pixel's UTC names) and says where it came
+  from; `earwitness.locate` audits, measures, fetches the flight days and the clip's lightning
+  hours, runs each method into its own run folder and words the confidence from the margins in
+  docs/VALIDATION.md. `earwitness measure` writes the automatic events.json;
+  `scripts/m4_acceptance.py --auto-events` checks the detector on the synthetic cases.
 - `earwitness demo` is the install check: library checks on tiny files of their own (GDAL and
   PROJ, the GLM NetCDF reader, Parquet, GEOS), then the two synthetic cases located offline.
   Keep it offline and under a minute; the Windows build's smoke test and the clean-machine

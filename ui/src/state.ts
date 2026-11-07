@@ -4,7 +4,7 @@
 import type { Bounds, EventsFile, FlyoverEvent, RecordingInfo } from "./types";
 
 export type Method = "audit" | "thunder" | "aircraft";
-export type ViewName = "audit" | "setup" | "audio" | "run" | "results";
+export type ViewName = "audit" | "locate" | "setup" | "audio" | "run" | "results";
 
 export interface Priors {
   date: string;
@@ -36,6 +36,19 @@ export interface AircraftOptions {
   variant: "prod" | "staging";
 }
 
+/** The one-step Locate page: when (local wall-clock time and zone) and roughly where. */
+export interface LocatePrefs {
+  center: [number, number] | null; // lat, lon
+  radiusKm: number;
+  when: "exact" | "rough" | "day";
+  date: string; // local YYYY-MM-DD
+  time: string; // local HH:MM:SS
+  zone: string; // "computer", "utc" or an offset in minutes
+  roughMinutes: number;
+  jobId: string | null;
+  forRecording: string | null; // the recording the time was last filled in for
+}
+
 export interface AppState {
   view: ViewName;
   method: Method;
@@ -44,6 +57,7 @@ export interface AppState {
   events: EventsFile;
   thunder: ThunderOptions;
   aircraft: AircraftOptions;
+  locate: LocatePrefs;
   jobId: string | null;
   runId: string | null;
 }
@@ -81,6 +95,17 @@ function defaults(): AppState {
       satellite: "auto",
     },
     aircraft: { silence: "soft", terrain: true, top: 10, max_candidates: 30000, harmonics: 3, variant: "prod" },
+    locate: {
+      center: null,
+      radiusKm: 25,
+      when: "exact",
+      date: "",
+      time: "",
+      zone: "computer",
+      roughMinutes: 10,
+      jobId: null,
+      forRecording: null,
+    },
     jobId: null,
     runId: null,
   };
@@ -98,6 +123,7 @@ function load(): AppState {
       priors: { ...base.priors, ...(saved.priors ?? {}) },
       thunder: { ...base.thunder, ...(saved.thunder ?? {}) },
       aircraft: { ...base.aircraft, ...(saved.aircraft ?? {}) },
+      locate: { ...base.locate, ...(saved.locate ?? {}) },
       events: saved.events ?? base.events,
     };
   } catch {

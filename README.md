@@ -25,6 +25,13 @@ around them in the search region, one, a security camera's single clap with no c
 almost anywhere, and one with its camera clock on screen brought the truth to sixth, 4.3 km off.
 See [docs/VALIDATION.md](docs/VALIDATION.md).
 
+Since v0.1.0, unreleased: a one-step locate (`earwitness locate`, the UI's Locate page) that
+measures the flyovers itself and reads the start time from the file. It located the personal
+clip about 300 m off with the right flight pair, and missed the video case, whose faint
+flyover it measured on another sound. On the ten synthetic single-flyover cases of M4 it put
+the answer within 200 m in 7, against 10 with the truth's own measurements. The
+hand-measurement path stays for the misses.
+
 | Milestone | Scope | State |
 | --- | --- | --- |
 | M0 | Scaffold, CI, packaging | done |
@@ -92,13 +99,28 @@ contains, what each could reveal, and what has been shown to help:
 uv run earwitness audit recording.wav
 ```
 
+Or find where it was made in one step. Say roughly where (a point and a radius); the start
+time is read from the file when it carries one, as phone videos do, or give `--start` (to the
+second, or with `--tolerance`) or `--date` (only the day). The flyovers are measured
+automatically, the day's flights and the clip's lightning are downloaded, each method the
+recording has clues for runs, and each answer says how sure it is:
+
+```bash
+uv run earwitness locate recording.mp4 --near 35.2,-97.4 --radius-km 25
+```
+
+`earwitness measure recording.mp4 --out events.json` writes the automatically measured
+flyovers as an events file for `analyze aircraft`, to check or edit by hand.
+
 Open the desktop UI: a local web app in a native window (`--browser` opens it in the system
-browser instead). It walks through audit, setup (file, method, dates, a search region drawn
-on a map), audio (spectrogram with band zoom, Doppler fit sliders, trace tool and silence
-windows for aircraft; the loudness envelope for thunder), run (cached data, options, a
-compute estimate, live log) and results (heat map, ranked list, score histogram, observed
-versus modeled overlays). Everything runs on this computer, on a random localhost port
-guarded by a session token.
+browser instead). It opens on the audit; Locate then takes a file, a rough time and place, and
+gives the answer in one step, with the start time filled in from the file. The by-hand pages
+remain for measuring flyovers yourself: setup (file, method, dates, a search region drawn on a
+map), audio (spectrogram with band zoom, Doppler fit sliders, trace tool and silence windows
+for aircraft; the loudness envelope for thunder) and run (cached data, options, a compute
+estimate, live log). Results shows any run: heat map, ranked list, score histogram, observed
+versus modeled overlays. Everything runs on this computer, on a random localhost port guarded
+by a session token.
 
 ```bash
 uv run earwitness ui

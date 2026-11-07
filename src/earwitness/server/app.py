@@ -246,6 +246,45 @@ def create_app(ws: Workspace) -> FastAPI:
         rec = recording(ws, rid)
         return audit_file(rec.path, rec.samples, rec.rate).to_dict()  # type: ignore[attr-defined]
 
+    @api.get("/recordings/{rid}/start")
+    def recording_start(rid: str, ws: Ws) -> dict[str, object]:
+        """The start time the file name and tags give, and this computer's UTC offset."""
+        from datetime import datetime
+
+        from earwitness.audit.clock import start_time
+        from earwitness.audit.report import probe_metadata
+
+        rec = recording(ws, rid)
+        meta = probe_metadata(rec.path)  # type: ignore[attr-defined]
+        tags = meta.get("tags") if isinstance(meta.get("tags"), dict) else {}
+        found = start_time(rec.path.name, tags, rec.duration_s)  # type: ignore[arg-type,attr-defined]
+        offset = datetime.now().astimezone().utcoffset()
+        return {
+            "start": None if found is None else found.to_dict(),
+            "computer_offset_min": 0 if offset is None else round(offset.total_seconds() / 60),
+        }
+
+    @api.post("/recordings/{rid}/flyovers")
+    def recording_flyovers(rid: str, ws: Ws) -> dict[str, object]:
+        """Propeller flyovers measured automatically, with the strongest two as events."""
+        from earwitness.aircraft.detect import Detection, auto_events
+
+        rec = recording(ws, rid)
+        try:
+            det = rec.detection()  # type: ignore[attr-defined]
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        assert isinstance(det, Detection)
+        events = auto_events(
+            det,
+            recording={"file": rec.path.name, "sha256": rec.sha256},  # type: ignore[attr-defined]
+        )
+        return {
+            "flyovers": [f.summary() for f in det.flyovers],
+            "counts": det.counts,
+            "events": None if events is None else events.to_dict(),
+        }
+
     # ------------------------------------------------------------------ Doppler fit tools
 
     @api.post("/doppler/preview")
@@ -327,6 +366,20 @@ def create_app(ws: Workspace) -> FastAPI:
             "aircraft",
             f"aircraft: {rec.path.name}",  # type: ignore[attr-defined]
             lambda p: runs.run_aircraft(ws, req, p),
+        )
+        return job.snapshot()
+
+    @api.post("/locate", status_code=202)
+    def start_locate(req: runs.LocateRequest, ws: Ws) -> dict[str, object]:
+        rec = recording(ws, req.recording_id)
+        try:
+            runs.locate_priors(req)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        job = ws.jobs.submit(
+            "locate",
+            f"locate: {rec.path.name}",  # type: ignore[attr-defined]
+            lambda p: runs.run_locate(ws, req, p),
         )
         return job.snapshot()
 

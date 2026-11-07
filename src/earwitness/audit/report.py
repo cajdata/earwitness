@@ -47,6 +47,10 @@ METADATA_KEYWORDS = (
     "title",
     "copyright",
     "device",
+    "offset",
+    "android",
+    "apple",
+    "quicktime",
 )
 LOCATION_KEYWORDS = ("location", "gps", "latitude", "longitude")
 TIME_KEYWORDS = ("creation", "date", "time")
@@ -376,8 +380,13 @@ def probe_metadata(path: Path) -> dict[str, object]:
     audio = next((s for s in streams if s.get("codec_type") == "audio"), {})
     interesting = {k: v for k, v in tags.items() if any(w in k.lower() for w in METADATA_KEYWORDS)}
     rate = audio.get("sample_rate")
+    try:
+        duration = float(fmt.get("duration")) if fmt.get("duration") is not None else None
+    except (TypeError, ValueError):
+        duration = None
     return {
         "available": True,
+        "duration_s": duration,
         "container": fmt.get("format_name"),
         "codec": audio.get("codec_name"),
         "sample_rate_hz": int(rate) if isinstance(rate, str) and rate.isdigit() else None,

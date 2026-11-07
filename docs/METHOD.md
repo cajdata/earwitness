@@ -292,3 +292,73 @@ Implementation notes that differ from or sharpen the handoff:
   OpenStreetMap tile policy asks of apps using its tiles.
 - The front end's build writes `third-party-licenses.txt` (MapLibre GL JS, Plotly.js) beside
   the page, because the minified bundle drops their notices; the footer links it.
+
+## One-step locate (after v0.1.0)
+
+The by-hand path asks a user to fit each flyover with sliders and a trace tool and to type
+UTC dates and a box in degrees. The one-step path (`earwitness locate`, the UI's Locate page)
+does those steps itself and keeps the by-hand pages for checking them.
+
+- Automatic flyover measurement (`aircraft.detect`, also `earwitness measure`). On the same
+  whitened spectrogram the hand measurements used (4 kHz, 4096-point frames, 512 hop):
+  - Peaks: per frame, local maxima over two bins either side, 6 dB above the per-frequency
+    median, the strongest 12.
+  - Tracks: peaks linked frame to frame, each track taking the free peak nearest its predicted
+    frequency (its last frequency plus its slope over the last eight frames); longer tracks
+    choose first, so crossing lines keep their own tracks. Tracks of 6 s or more that fall by
+    2% or more seed a fit.
+  - Fit and follow: the straight-flyover fit of a track predicts the whole curve; the peaks
+    nearest it (within 1.2% or 1.5 bins), one per frame, are fitted again, up to four times.
+    Two rules keep the trace on the aircraft. Only runs of hits lasting 1.5 s count, because
+    scattered noise peaks near a flat wing would otherwise pin a speed. And only the falling
+    part counts, 5% to 95% of the drop from the approach asymptote to the recede one, because
+    the far wings run alongside steady tones (engines, hum, road noise). Both were found on the
+    M6 recordings: a trace of the second flyover in the personal clip took wing noise and
+    pinned 68 m/s against the 98 m/s that located it, and steady tones beside the video's
+    faint flyover narrowed its speed profile so far that the true aircraft fell outside it.
+  - Gate: 25 to 160 m/s, closest approach 150 m to 12 km, d / v at least 4 s (road traffic
+    passes in a second or two), rms within the larger of 1.2 Hz and 0.6% of f0.
+  - Group: lines whose heard crossings lie within max(8 s, 0.4 d / v) of each other, or that
+    follow one scaled copy of a fitted curve, are one aircraft: the harmonics of its blade
+    passage and engine. The aircraft with the most brightness along its lines goes first and
+    claims the peaks along them; every weaker one is measured again without those peaks, so a
+    faint flyover cannot borrow a louder one's harmonics. Each aircraft keeps its clearest line;
+    its consecutive harmonics among the others (1 to 3) are what the scorer sums.
+  - Events: the strongest two aircraft (one, when the start time is known) become `auto1` and
+    `auto2`, built as a hand-traced event is: the profiled fit's ranges and speed valley. The
+    valley keeps speeds whose fit lies within the larger of 0.5 Hz and the trace's own rms of
+    the best, since an automatic trace scatters more than a hand-placed one. An aircraft heard
+    within 30 s of either end of the clip is taken only when too few others are found: half its
+    curve lies outside the clip, and in a synthetic case such a pick, 19 s in, matched a flight
+    910 km away.
+- Start time from the file (`audit.clock`):
+  - Android camera apps name a video by its local start time; Samsung adds its UTC offset as a
+    tag, and Android writes the container's `creation_time` when recording stops, so the start
+    is that minus the clip's length. On the personal clip the name and the stop time agree to
+    1.4 s.
+  - iPhones write `com.apple.quicktime.creationdate`, the local start with its offset; Pixel
+    names files in UTC. A name in local time and a UTC tag that agree within 5 s at a whole
+    quarter hour fix the zone; a name alone takes this computer's zone, and says so.
+  - Nothing here is certain, so the time is shown for the user to confirm and is used as a prior
+    with a tolerance: 2 s when exact, half the clip when the file only brackets it.
+- The locate run (`locate.locate`):
+  - It audits the file, measures the flyovers and, for aircraft, loads every UTC day the clip
+    itself can touch (the start window plus the clip's length), or the named days when only the
+    day is known, downloading a missing day for the area widened by 30 km. A day is several GB
+    to download, so neighbouring days are not fetched on a guess.
+  - For thunder, it fetches only the clip's own lightning hours when the start is known, since
+    a flash is heard within about 75 s at 25 km, and the whole day otherwise. Thunder is skipped
+    when the audit heard no thunder-like bursts or when the aircraft answer is already clear.
+  - Candidates are scored without the CLI's 30,000 cap (up to 5,000,000), as in the real
+    cases; the cap had dropped the true cell of the video case in a test.
+  - The answer's confidence comes from the margin over the runner-up. In docs/VALIDATION.md
+    every located aircraft case won by 1.6 or more and every failed one by 0.2 or less, so an
+    aircraft answer is "clear" from 1.0, "probable" from 0.3 and "not settled" below. The one
+    located thunder case won by 0.084 and every failure by 0.031 or less, so a thunder answer
+    is at best "possible", from 0.06. An answer that is the only one left after the filters is
+    "probable" ("possible" for thunder): nothing competes with it, but nothing confirms it
+    either.
+- The region is a point and a radius (the square around the circle), and times are typed in
+  local time with a zone. Both are converted at the edge; the engine still takes UTC and boxes.
+- Media links are not downloaded (HANDOFF, responsible release): the one-step path opens local
+  files only.

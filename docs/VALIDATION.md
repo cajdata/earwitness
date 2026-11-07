@@ -1,7 +1,112 @@
 # Validation
 
-Results of the acceptance checks, synthetic first (M2, M4, M5) and real recordings last (M6).
-Every number here comes from a run that can be repeated with the command shown.
+Results of the acceptance checks, newest first: the work after v0.1.0, the release (M7), real
+recordings (M6), the desktop UI (M5) and the synthetic checks (M4, M3, M2). Every number here
+comes from a run that can be repeated with the command shown.
+
+## One-step locate (after v0.1.0)
+
+`earwitness locate` and the UI's Locate page measure the flyovers automatically
+(`earwitness.aircraft.detect`), read the start time from the file (`earwitness.audit.clock`)
+and run each method (docs/METHOD.md, "One-step locate"). The automatic measurement was checked
+against the hand-measured events of M6 and on the synthetic M4 cases with their truth hidden.
+
+### The two real aircraft recordings
+
+| case | measured | priors | rank-1 error (m) | rank within 200 m | score, margin | start error (s) | truth rank in the final stage | counts | runtime (s) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| personal-1, the Locate page | automatically | the file's own start +-2 s (its name, UTC offset tag and stop time agree to 1.4 s), 25 km around a point | 315 | none (200 m) | 16.06, the only pair left | +5.0 | 1 of 35 (coarse; nearest 41 m) | flights 79, pairs 801, candidates 35 | 15 |
+| personal-1, the same with the curve's wings traced too | automatically | clock +-2 s, metro box | 184 | 1 (200 m) | 16.96, the only pair left | +0.3 | 2 of 41 (coarse; nearest 93 m) | flights 92, pairs 460, candidates 41 | 16 |
+| personal-1, M6 third pass | by hand | clock +-2 s, metro box | 190 | 1 (200 m) | 17.53, margin 3.33 | +0.5 | 2 of 99 (coarse; nearest 93 m) | flights 92, pairs 2769, candidates 99 | 65 |
+| colsto | automatically | the day, metro box | 52729 | none (200 m) | 16.97, margin 0.18 | -30000.8 | 5137 of 97634 (coarse; nearest 55 m) | flights 3549, pairs 6979, candidates 97634 | 249 |
+| colsto, with the curve's wings traced too | automatically | the day, metro box | 52872 | none (200 m) | 20.49, margin 0.08 | -69963.1 | none of 39465 (coarse; nearest 465 m) | flights 3549, pairs 3987, candidates 39465 | 107 |
+| colsto, M6 run 5 | by hand | the day, metro box | 173 | 1 (200 m) | 19.88, margin 1.61 | +0.4 | 1 of 129236 (coarse; nearest 55 m) | flights 3549, pairs 44480, candidates 129236 | 546 |
+
+personal-1 is located from its own file: the automatic pass finds both flyovers the hand
+measurement used and the same flight pair, and the start time comes from the file name. The
+first automatic traces did not get there:
+- A trace that followed the brightest bin of a box around each sweep the audit reported
+  fitted 12 Hz at 309 m/s. The clip's loud flyover is a dense stack of lines, and the bin
+  jumped between them; linking peaks into tracks fixed it.
+- The second flyover's trace ran on into the first one's receding harmonics until the
+  stronger aircraft claimed its own peaks first.
+- Scattered noise peaks along the flat wings then pinned 68 m/s against the 98 m/s that
+  located it, until only runs of hits counted.
+- With every rule in place, a narrow speed profile still missed the truth (39.7 km off)
+  until the profile's tolerance followed each trace's own scatter.
+
+The video case fails automatically: its faint second flyover is measured on a 134.8 Hz line,
+while the aircraft that made it, scored by hand at the true site, is brightest at 125.7 Hz on
+its curve; the automatic line lies 6 s and 8 Hz from that curve, so it is another sound. Both
+automatic runs say so in their margins (0.18 and 0.08, "not settled"). Two settings trade
+places on the two cases: tracing the curve's wings as well narrows the speed profile, which
+puts personal-1 at 184 m but drops the video's true cell from the candidates altogether.
+
+The candidate cap mattered too. The first automatic runs of the video case used the CLI's
+default cap of 30,000 candidates, sampled at random from 97,634, and the true cell was among
+the ones dropped. The real cases were always scored uncapped, so `earwitness locate` scores up
+to 5,000,000.
+
+### Synthetic cases with automatic events: 7 of 10
+
+```bash
+uv run python scripts/m4_acceptance.py --date 2026-09-08 --bbox=-100,30,-85,42 --cases 10 --seed 2 --mode single --auto-events --out runs/m4-single-auto
+```
+
+These are the ten single-event cases of M4 (seed 2), with the truth hidden from the
+measurement: the strongest flyover heard well inside the clip becomes the event, with the
+known start time, as `earwitness locate` takes it, and no silence windows are marked.
+
+| case | sources rendered | rank-1 error (m) | mirror (m) | flight of the answer | rank within 200 m | candidates | margin (dB) | runtime (s) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 5 | 9 | 1,141 | the case's event flight | 1 | 8,121 | 0.80 | 153 |
+| 2 | 1 | 236 | 36 | the case's event flight | none (the mirror) | 2,687 | 2.86 | 85 |
+| 3 | 5 | 38 | 34 | another rendered flight | 1 | 12,900 | 0.58 | 212 |
+| 4 | 1 | 318 | 320 | the case's event flight | none | 2,642 | 0.38 | 85 |
+| 5 | 5 | 163 | 613 | another rendered flight | 1 | 12,563 | 0.03 | 206 |
+| 6 | 2 | 61 | 632 | another rendered flight | 1 | 9,509 | 0.06 | 168 |
+| 7 | 4 | 38 | 443 | the case's event flight | 1 | 2,999 | 0.28 | 89 |
+| 8 | 2 | 7 | 556 | the case's event flight | 1 | 9,516 | 0.70 | 170 |
+| 9 | 1 | 25 | 1,191 | the case's event flight | 1 | 44,133 | 1.41 | 420 |
+| 10 | 16 | 1,674 | 2,218 | the case's event flight, another part of its circuit | none | 69,477 | 0.37 | 313 |
+
+Rank 1 within 200 m in 7 of 10, 8 of 10 counting the mirror (case 2). M4 asks 6 of 10 of
+single-event mode with hand measurements; with the truth's own events and silence windows the
+same cases scored 10 of 10.
+
+- **No silence windows.** The automatic events carry none, so no candidate is ruled out by a
+  flight it should have heard.
+- **The strongest flyover is not always the case's own.** The harness's event flight is the
+  closest one. In cases 3, 5 and 6 the detector chose another, stronger flyover, and the
+  answer still landed within 200 m.
+- **Two misses on the right flight.** In cases 2 and 4 the right flight was found but the
+  answer sits 236 m and 318 m off. Case 2's answer is 36 m from the site's mirror image,
+  which one straight pass cannot tell from the site; its fitted distance was 753 m against the
+  truth's 1144 m. Case 4's distance was right to 1%, and its answer lies equally far from the
+  site and the mirror, under the flight path between them, which one straight pass cannot
+  separate either.
+- **Case 10, a busy sky.** Sixteen sources were rendered, among them aircraft flying circuits
+  beside the site. The first run took the strongest flyover, heard 19 s into the clip, where
+  two aircraft pass 7 s apart and half the curve lies before the clip starts, and matched a
+  flight 910 km away. Flyovers heard within 30 s of either end are now taken only when nothing
+  else is found; that changed no other case's choice. The next strongest, heard at 269 s,
+  lies where two aircraft overlap, a twin passing 1.25 km away (heard closest at 261 s) and a
+  turboprop 3.1 km away (at 300 s), and its fit (105 Hz, 40 m/s, 925 m) matches neither. Its
+  ranges fix little (heard 264 to 409 s, 19 to 280 m/s), and the search put the answer on the
+  circuit of the case's own event flight 1.7 km from the site, by 0.37 ("probable"). In the
+  same clip the detector measured three flyovers within 1 Hz and 11% of their truth (heard at
+  213, 854 and 1129 s), and the setting below located the case from one heard at 345 s:
+  choosing the best-measured flyover rather than the strongest is the next thing to try.
+- **Tracing the wings scored 7 of 10.** With the curve's wings traced as well (`--core 0 1`,
+  run before the edge rule), the same cases scored 7 of 10. It located case 10 (18 m, from the
+  flyover heard at 345 s, which that setting measured as the strongest) but lost case 2 to a
+  flight 1,223 km away, case 5 to one 383 km away, and case 4 by 234 m.
+- **Margins are thinner.** The margins over the runner-up (0.03 to 2.86) run below the
+  truth-event runs' (0.5 to 4.7). Three correct answers won by less than 0.3, which the
+  confidence words call "not settled": with one flyover, correct and ambiguous often go
+  together. The misses in cases 4 and 10 won by 0.38 and 0.37 ("probable"), and case 2 by
+  2.86 ("clear") on the right flight but the mirror side: the margin weighs other flights, not
+  the two sides of one straight pass.
 
 ## M7: release checks
 

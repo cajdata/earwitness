@@ -435,3 +435,37 @@ kbd {
   border-radius: 4px;
   padding: 0 4px;
 }
+
+/* one-step Locate page */
+.nav-label {
+  color: #64748b;
+  font-size: 12px;
+  margin: 0 2px 0 10px;
+  align-self: center;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px 0;
+}
+
+.row.inline {
+  display: inline-flex;
+  margin: 0 0 0 6px;
+  gap: 6px;
+}
+
+ul.plain {
+  margin: 6px 0 10px;
+  padding-left: 20px;
+}
+
+ul.plain li {
+  margin: 2px 0;
+}
+
+.answer {
+  font-size: 18px;
+}
